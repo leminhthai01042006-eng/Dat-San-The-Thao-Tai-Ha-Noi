@@ -58,3 +58,56 @@ CREATE TABLE BOOKINGS (
     
     CONSTRAINT chk_time CHECK (end_time > start_time)
 );
+
+CREATE INDEX idx_court_time ON BOOKINGS (court_id, start_time, end_time);
+
+DELIMITER //
+
+-- Trigger kiểm tra khi THÊM mới đơn đặt sân
+CREATE TRIGGER prevent_overlapping_booking_insert
+BEFORE INSERT ON BOOKINGS
+FOR EACH ROW
+BEGIN
+    DECLARE overlap_count INT;
+    
+    -- Nếu đơn được tạo ở trạng thái có hiệu lực
+    IF NEW.status IN ('PENDING', 'CONFIRMED') THEN
+        SELECT COUNT(*) INTO overlap_count
+        FROM BOOKINGS
+        WHERE court_id = NEW.court_id
+          AND status IN ('PENDING', 'CONFIRMED')
+          AND (NEW.start_time < end_time AND NEW.end_time > start_time);
+
+        IF overlap_count > 0 THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Lỗi: Khung giờ đặt sân bị trùng lặp với một đơn khác đang có hiệu lực.';
+        END IF;
+    END IF;
+END;
+//
+
+-- Trigger kiểm tra khi CẬP NHẬT đơn đặt sân (Ví dụ: Duyệt đơn)
+CREATE TRIGGER prevent_overlapping_booking_update
+BEFORE UPDATE ON BOOKINGS
+FOR EACH ROW
+BEGIN
+    DECLARE overlap_count INT;
+
+    -- Nếu đơn được cập nhật sang trạng thái có hiệu lực
+    IF NEW.status IN ('PENDING', 'CONFIRMED') THEN
+        SELECT COUNT(*) INTO overlap_count
+        FROM BOOKINGS
+        WHERE court_id = NEW.court_id
+          AND booking_id != NEW.booking_id
+          AND status IN ('PENDING', 'CONFIRMED')
+          AND (NEW.start_time < end_time AND NEW.end_time > start_time);
+
+        IF overlap_count > 0 THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Lỗi: Cập nhật thất bại. Khung giờ mới bị trùng lặp với một đơn khác.';
+        END IF;
+    END IF;
+END;
+//
+
+DELIMITER ;
