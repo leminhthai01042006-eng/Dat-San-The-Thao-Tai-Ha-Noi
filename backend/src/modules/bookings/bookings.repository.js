@@ -120,4 +120,109 @@ async function cancelBookingByUser({ bookingId, userId }) {
   }
 }
 
-module.exports = { createBooking, listBookingsByUser, cancelBookingByUser };
+async function listPendingBookingsByOwner(ownerId) {
+  const [bookings] = await db.execute(
+    `
+    SELECT b.booking_id,
+           b.booking_code,
+           f.facility_name,
+           c.court_name,
+           DATE_FORMAT(b.start_time, '%Y-%m-%d %H:%i:%s') AS start_time,
+           DATE_FORMAT(b.end_time, '%Y-%m-%d %H:%i:%s') AS end_time,
+           DATE_FORMAT(b.hold_expires_at, '%Y-%m-%d %H:%i:%s') AS hold_expires_at,
+           b.approval_status
+    FROM BOOKINGS AS b
+    JOIN FACILITIES AS f ON f.facility_id = b.facility_id
+    JOIN COURTS AS c ON c.court_id = b.court_id
+    WHERE f.owner_id = ?
+      AND b.status = 'Pending'
+      AND b.approval_status = 'Pending'
+      AND b.hold_expires_at > TIMESTAMPADD(HOUR, 7, UTC_TIMESTAMP())
+    ORDER BY b.hold_expires_at, b.booking_id
+    LIMIT 50
+  `,
+    [ownerId],
+  );
+
+  return bookings;
+}
+async function decideBookingByOwner({ bookingId, ownerId, decision }) {
+  if (decision !== "Confirmed" && decision !== "Rejected") {
+    throw new TypeError("Quyết định duyệt đơn không hợp lệ.");
+  }
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.query("SET time_zone = '+07:00'");
+    await connection.execute("SET @app_user_id = ?", [ownerId]);
+    await connection.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    await connection.beginTransaction();
+
+    const [bookings] = await connection.execute(
+      `
+      SELECT b.court_id,
+             DATE_FORMAT(b.start_time, '%Y-%m-%d %H:%i:%s') AS start_time,
+             DATE_FORMAT(b.end_time, '%Y-%m-%d %H:%i:%s') AS end_time
+      FROM BOOKINGS AS b
+      JOIN FACILITIES AS f ON f.facility_id = b.facility_id
+      WHERE b.booking_id = ?
+        AND f.owner_id = ?
+        AND b.status = 'Pending'
+        AND b.approval_status = 'Pending'
+        AND b.hold_expires_at > NOW()
+        AND b.start_time > NOW()
+      FOR UPDATE OF b
+    `,
+      [bookingId, ownerId],
+    );
+
+    if (bookings.length === 0) {
+      await connection.rollback();
+      return false;
+    }
+
+    const booking = bookings[0];
+    if (decision === "Confirmed") {
+      await connection.execute("CALL sp_lock_court_days(?, ?, ?)", [
+        booking.court_id,
+        booking.start_time,
+        booking.end_time,
+      ]);
+    }
+
+    const newStatus = decision === "Rejected" ? "Cancelled" : "Pending";
+    const cancelReason = decision === "Rejected" ? "Chu san tu choi don" : null;
+
+    const [result] = await connection.execute(
+      `
+      UPDATE BOOKINGS
+      SET approval_status = ?, status = ?, cancel_reason = ?
+      WHERE booking_id = ?
+        AND hold_expires_at > NOW()
+        AND start_time > NOW()
+    `,
+      [decision, newStatus, cancelReason, bookingId],
+    );
+
+    await connection.commit();
+    return result.affectedRows === 1;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    try {
+      await connection.query("SET @app_user_id = NULL");
+      connection.release();
+    } catch {
+      connection.destroy();
+    }
+  }
+}
+module.exports = {
+  createBooking,
+  listBookingsByUser,
+  cancelBookingByUser,
+  listPendingBookingsByOwner,
+  decideBookingByOwner,
+};

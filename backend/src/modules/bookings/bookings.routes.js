@@ -4,6 +4,8 @@ const {
   createBooking,
   listBookingsByUser,
   cancelBookingByUser,
+  listPendingBookingsByOwner,
+  decideBookingByOwner,
 } = require("./bookings.repository");
 
 const router = express.Router();
@@ -129,6 +131,68 @@ router.post("/:bookingId/cancel", requireAuth, async (request, response) => {
   } catch (error) {
     console.error("Lỗi hủy đơn đặt sân:", error.code || error.message);
     return response.status(500).json({ error: "Không thể hủy đơn đặt sân." });
+  }
+});
+router.get("/pending-approval", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") {
+    return response
+      .status(403)
+      .json({ error: "Chỉ chủ sân được xem đơn chờ duyệt." });
+  }
+
+  try {
+    const bookings = await listPendingBookingsByOwner(request.user.user_id);
+    return response.json(bookings);
+  } catch (error) {
+    console.error("Lỗi lấy đơn chờ duyệt:", error.code || error.message);
+    return response
+      .status(500)
+      .json({ error: "Không thể lấy danh sách đơn chờ duyệt." });
+  }
+});
+router.post("/:bookingId/decision", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") {
+    return response.status(403).json({ error: "Chỉ chủ sân được duyệt đơn." });
+  }
+
+  const { bookingId } = request.params;
+  const { decision } = request.body ?? {};
+
+  if (!/^[1-9][0-9]*$/.test(bookingId)) {
+    return response
+      .status(400)
+      .json({ error: "Mã đơn phải là số nguyên dương." });
+  }
+
+  if (decision !== "Confirmed" && decision !== "Rejected") {
+    return response
+      .status(400)
+      .json({ error: "Quyết định phải là Confirmed hoặc Rejected." });
+  }
+
+  try {
+    const updated = await decideBookingByOwner({
+      bookingId,
+      ownerId: request.user.user_id,
+      decision,
+    });
+
+    if (!updated) {
+      return response
+        .status(404)
+        .json({ error: "Không tìm thấy đơn có thể duyệt." });
+    }
+
+    return response.json({ approval_status: decision });
+  } catch (error) {
+    if (error.sqlState === "45000") {
+      return response.status(409).json({
+        error: "Đơn hoặc khung giờ không còn đủ điều kiện để duyệt.",
+      });
+    }
+
+    console.error("Lỗi duyệt đơn đặt sân:", error.code || error.message);
+    return response.status(500).json({ error: "Không thể xử lý đơn đặt sân." });
   }
 });
 module.exports = router;
