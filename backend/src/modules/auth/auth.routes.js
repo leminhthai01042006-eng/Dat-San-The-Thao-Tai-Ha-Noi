@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const db = require('../../config/db');
+const requireAuth = require('../../middleware/requireAuth');
 
 const router = express.Router();
 
@@ -59,29 +60,8 @@ router.post('/login', async (request, response) => {
     return response.status(500).json({ error: 'Không thể xử lý đăng nhập.' });
   }
 });
-router.get('/me', async (request, response) => {
-  const userId = request.session?.userId;
-
-  if (!userId) {
-    return response.status(401).json({ error: 'Bạn chưa đăng nhập.' });
-  }
-
-  try {
-    const [users] = await db.execute(`
-      SELECT user_id, full_name, email, role
-      FROM USERS
-      WHERE user_id = ? AND status = 'Active' AND deleted_at IS NULL
-    `, [userId]);
-
-    if (users.length === 0) {
-      return response.status(401).json({ error: 'Phiên đăng nhập không còn hợp lệ.' });
-    }
-
-    return response.json(users[0]);
-  } catch (error) {
-    console.error('Lỗi lấy thông tin phiên:', error.code || error.message);
-    return response.status(500).json({ error: 'Không thể lấy thông tin tài khoản.' });
-  }
+router.get('/me', requireAuth, (request, response) => {
+  return response.json(request.user);
 });
 router.post('/logout', (request, response) => {
   request.session.destroy((error) => {

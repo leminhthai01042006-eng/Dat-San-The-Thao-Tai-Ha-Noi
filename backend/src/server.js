@@ -4,6 +4,7 @@ const db = require('./config/db');
 const facilitiesRouter = require('./modules/facilities/facilities.routes');
 const courtsRouter = require('./modules/courts/courts.routes');
 const authRouter = require('./modules/auth/auth.routes');
+const bookingsRouter = require('./modules/bookings/bookings.routes');
 
 const app = express();
 const port = 3000;
@@ -34,6 +35,7 @@ app.use(session({
 }));
 
 app.use('/api/auth', authRouter);
+app.use('/api/bookings', bookingsRouter);
 app.listen(port, (error) => {
   if (error) {
     console.error('Không thể khởi động backend:', error);
