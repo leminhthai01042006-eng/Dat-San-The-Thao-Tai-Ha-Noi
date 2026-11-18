@@ -22,7 +22,6 @@ app.get("/api/health", async (_request, response) => {
   }
 });
 app.use("/api/facilities", facilitiesRouter);
-app.use("/api/facilities", courtsRouter);
 app.use(express.json());
 
 app.use(
@@ -38,9 +37,10 @@ app.use(
     },
   }),
 );
-
+app.use("/api/facilities", courtsRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/bookings", bookingsRouter);
+
 async function runBookingExpiry() {
   try {
     const count = await expirePendingBookings();
@@ -54,6 +54,7 @@ async function runBookingExpiry() {
     setTimeout(runBookingExpiry, 60_000).unref();
   }
 }
+
 app.listen(port, (error) => {
   if (error) {
     console.error("Không thể khởi động backend:", error);

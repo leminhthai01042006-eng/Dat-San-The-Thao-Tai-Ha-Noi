@@ -1,17 +1,19 @@
-const express = require('express');
-const db = require('../../config/db');
+const express = require("express");
+const db = require("../../config/db");
+const requireAuth = require("../../middleware/requireAuth");
 
 const router = express.Router();
 
-router.get('/:facilityId/courts', async (request, response) => {
+router.get("/:facilityId/courts", async (request, response) => {
   const { facilityId } = request.params;
 
   if (!/^[1-9][0-9]*$/.test(facilityId)) {
-    return response.status(400).json({ error: 'Mã cụm sân không hợp lệ.' });
+    return response.status(400).json({ error: "Mã cụm sân không hợp lệ." });
   }
 
   try {
-    const [courts] = await db.execute(`
+    const [courts] = await db.execute(
+      `
       SELECT c.court_id, c.court_name, c.sport_type,
              c.price_per_hour, c.status, c.requires_approval
       FROM COURTS AS c
@@ -21,48 +23,65 @@ router.get('/:facilityId/courts', async (request, response) => {
         AND f.is_active = 1
         AND f.deleted_at IS NULL
       ORDER BY c.court_name, c.court_id
-    `, [facilityId]);
+    `,
+      [facilityId],
+    );
 
     response.json(courts);
   } catch (error) {
-    console.error('Lỗi lấy danh sách sân:', error.code || error.message);
-    response.status(500).json({ error: 'Không thể lấy danh sách sân.' });
+    console.error("Lỗi lấy danh sách sân:", error.code || error.message);
+    response.status(500).json({ error: "Không thể lấy danh sách sân." });
   }
 });
 
-router.get('/:facilityId/courts/:courtId/availability', async (request, response) => {
-  const { facilityId, courtId } = request.params;
-  const { date } = request.query;
-  const positiveId = /^[1-9][0-9]*$/;
+router.get(
+  "/:facilityId/courts/:courtId/availability",
+  async (request, response) => {
+    const { facilityId, courtId } = request.params;
+    const { date } = request.query;
+    const positiveId = /^[1-9][0-9]*$/;
 
-  if (!positiveId.test(facilityId) || !positiveId.test(courtId)) {
-    return response.status(400).json({ error: 'Mã cụm sân hoặc mã sân không hợp lệ.' });
-  }
+    if (!positiveId.test(facilityId) || !positiveId.test(courtId)) {
+      return response
+        .status(400)
+        .json({ error: "Mã cụm sân hoặc mã sân không hợp lệ." });
+    }
 
-  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return response.status(400).json({ error: 'Nhập ngày theo định dạng YYYY-MM-DD.' });
-  }
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return response
+        .status(400)
+        .json({ error: "Nhập ngày theo định dạng YYYY-MM-DD." });
+    }
 
-  const parsedDate = new Date(`${date}T00:00:00Z`);
-  if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
-    return response.status(400).json({ error: 'Ngày không hợp lệ.' });
-  }
+    const parsedDate = new Date(`${date}T00:00:00Z`);
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      return response.status(400).json({ error: "Ngày không hợp lệ." });
+    }
 
-  try {
-    const [courts] = await db.execute(`
+    try {
+      const [courts] = await db.execute(
+        `
       SELECT c.court_id, c.status, f.open_time, f.close_time, f.is_overnight
       FROM COURTS AS c
       JOIN FACILITIES AS f ON f.facility_id = c.facility_id
       WHERE c.facility_id = ? AND c.court_id = ?
         AND c.deleted_at IS NULL AND f.deleted_at IS NULL
         AND f.is_active = 1
-    `, [facilityId, courtId]);
+    `,
+        [facilityId, courtId],
+      );
 
-    if (courts.length === 0) {
-      return response.status(404).json({ error: 'Không tìm thấy sân trong cụm sân này.' });
-    }
+      if (courts.length === 0) {
+        return response
+          .status(404)
+          .json({ error: "Không tìm thấy sân trong cụm sân này." });
+      }
 
-    const [occupied] = await db.execute(`
+      const [occupied] = await db.execute(
+        `
       SELECT DATE_FORMAT(start_time, '%Y-%m-%d %H:%i:%s') AS start_time,
              DATE_FORMAT(end_time, '%Y-%m-%d %H:%i:%s') AS end_time
       FROM BOOKINGS
@@ -74,12 +93,71 @@ router.get('/:facilityId/courts/:courtId/availability', async (request, response
           OR hold_expires_at > TIMESTAMPADD(HOUR, 7, UTC_TIMESTAMP())
         )
       ORDER BY start_time
-    `, [courtId, date]);
+    `,
+        [courtId, date],
+      );
 
-    response.json({ ...courts[0], date, occupied });
-  } catch (error) {
-    console.error('Lỗi tra cứu lịch sân:', error.code || error.message);
-    response.status(500).json({ error: 'Không thể tra cứu lịch sân.' });
-  }
-});
+      response.json({ ...courts[0], date, occupied });
+    } catch (error) {
+      console.error("Lỗi tra cứu lịch sân:", error.code || error.message);
+      response.status(500).json({ error: "Không thể tra cứu lịch sân." });
+    }
+  },
+);
+router.patch(
+  "/:facilityId/courts/:courtId/status",
+  requireAuth,
+  async (request, response) => {
+    if (request.user.role !== "OWNER") {
+      return response
+        .status(403)
+        .json({ error: "Chỉ chủ sân được đổi trạng thái sân." });
+    }
+
+    const { facilityId, courtId } = request.params;
+    const { status } = request.body ?? {};
+    const positiveId = /^[1-9][0-9]*$/;
+
+    if (!positiveId.test(facilityId) || !positiveId.test(courtId)) {
+      return response
+        .status(400)
+        .json({ error: "Mã cụm sân hoặc mã sân không hợp lệ." });
+    }
+
+    if (!["Available", "Maintenance", "Inactive"].includes(status)) {
+      return response.status(400).json({
+        error: "Vui lòng chọn một trạng thái sân hợp lệ.",
+      });
+    }
+
+    try {
+      const [result] = await db.execute(
+        `
+      UPDATE COURTS AS c
+      JOIN FACILITIES AS f ON f.facility_id = c.facility_id
+      SET c.status = ?
+      WHERE c.facility_id = ?
+        AND c.court_id = ?
+        AND f.owner_id = ?
+        AND c.deleted_at IS NULL
+        AND f.deleted_at IS NULL
+    `,
+        [status, facilityId, courtId, request.user.user_id],
+      );
+
+      if (result.affectedRows === 0) {
+        return response
+          .status(404)
+          .json({ error: "Không tìm thấy sân bạn có thể quản lý." });
+      }
+
+      return response.json({ message: "Đã cập nhật trạng thái sân.", status });
+    } catch (error) {
+      console.error("Lỗi đổi trạng thái sân:", error.code || error.message);
+      return response
+        .status(500)
+        .json({ error: "Chưa thể cập nhật trạng thái sân. Vui lòng thử lại." });
+    }
+  },
+);
 module.exports = router;
