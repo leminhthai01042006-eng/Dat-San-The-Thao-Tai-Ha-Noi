@@ -5,6 +5,7 @@ const facilitiesRouter = require("./modules/facilities/facilities.routes");
 const courtsRouter = require("./modules/courts/courts.routes");
 const authRouter = require("./modules/auth/auth.routes");
 const bookingsRouter = require("./modules/bookings/bookings.routes");
+const adminRouter = require("./modules/admin/admin.routes");
 const {
   expirePendingBookings,
 } = require("./modules/bookings/bookings.repository");
@@ -40,6 +41,7 @@ app.use("/api/facilities", facilitiesRouter);
 app.use("/api/facilities", courtsRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/bookings", bookingsRouter);
+app.use("/api/admin", adminRouter);
 
 async function runBookingExpiry() {
   try {
