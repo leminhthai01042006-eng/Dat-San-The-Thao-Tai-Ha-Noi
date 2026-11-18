@@ -1,4 +1,5 @@
 const express = require("express");
+const { randomUUID } = require("node:crypto");
 const db = require("../../config/db");
 const requireAuth = require("../../middleware/requireAuth");
 
@@ -160,4 +161,94 @@ router.patch(
     }
   },
 );
+router.post("/:facilityId/courts", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") {
+    return response.status(403).json({ error: "Chỉ chủ sân được thêm sân." });
+  }
+
+  const { facilityId } = request.params;
+  const {
+    court_name,
+    sport_type,
+    price_per_hour,
+    requires_approval = false,
+  } = request.body ?? {};
+
+  if (!/^[1-9][0-9]*$/.test(facilityId)) {
+    return response.status(400).json({ error: "Mã cụm sân không hợp lệ." });
+  }
+
+  const name = typeof court_name === "string" ? court_name.trim() : "";
+  const sport = typeof sport_type === "string" ? sport_type.trim() : "";
+
+  if (!name || name.length > 120 || !sport || sport.length > 30) {
+    return response.status(400).json({
+      error: "Vui lòng nhập tên sân hợp lệ và chọn môn thể thao.",
+    });
+  }
+
+  if (
+    !Number.isSafeInteger(price_per_hour) ||
+    price_per_hour < 0 ||
+    price_per_hour > 9_999_999_999
+  ) {
+    return response.status(400).json({
+      error: "Vui lòng nhập giá thuê theo giờ bằng số đồng nguyên không âm.",
+    });
+  }
+
+  if (typeof requires_approval !== "boolean") {
+    return response.status(400).json({
+      error: "Vui lòng chọn sân có cần chủ sân duyệt đơn hay không.",
+    });
+  }
+
+  const courtCode = randomUUID();
+
+  try {
+    const [result] = await db.execute(
+      `
+      INSERT INTO COURTS (
+        facility_id, sport_type, court_code, court_name,
+        price_per_hour, requires_approval
+      )
+      SELECT facility_id, ?, ?, ?, ?, ?
+      FROM FACILITIES
+      WHERE facility_id = ? AND owner_id = ? AND deleted_at IS NULL
+    `,
+      [
+        sport,
+        courtCode,
+        name,
+        price_per_hour,
+        requires_approval,
+        facilityId,
+        request.user.user_id,
+      ],
+    );
+
+    if (result.affectedRows === 0) {
+      return response.status(404).json({
+        error: "Không tìm thấy cụm sân bạn có thể quản lý.",
+      });
+    }
+
+    return response.status(201).json({
+      message: "Đã thêm sân.",
+      court_id: result.insertId,
+      court_code: courtCode,
+    });
+  } catch (error) {
+    if (error.code === "ER_NO_REFERENCED_ROW_2") {
+      return response.status(400).json({
+        error: "Môn thể thao đã chọn không có trong danh mục.",
+      });
+    }
+
+    console.error("Lỗi thêm sân:", error.code || error.message);
+    return response.status(500).json({
+      error: "Chưa thể thêm sân. Vui lòng thử lại.",
+    });
+  }
+});
 module.exports = router;
