@@ -251,4 +251,87 @@ router.post("/:facilityId/courts", requireAuth, async (request, response) => {
     });
   }
 });
+router.put(
+  "/:facilityId/courts/:courtId",
+  requireAuth,
+  async (request, response) => {
+    if (request.user.role !== "OWNER") {
+      return response
+        .status(403)
+        .json({ error: "Chỉ chủ sân được sửa thông tin sân." });
+    }
+
+    const { facilityId, courtId } = request.params;
+    const { court_name, price_per_hour, requires_approval } =
+      request.body ?? {};
+    const positiveId = /^[1-9][0-9]*$/;
+
+    if (!positiveId.test(facilityId) || !positiveId.test(courtId)) {
+      return response
+        .status(400)
+        .json({ error: "Mã cụm sân hoặc mã sân không hợp lệ." });
+    }
+
+    const name = typeof court_name === "string" ? court_name.trim() : "";
+
+    if (!name || name.length > 120) {
+      return response
+        .status(400)
+        .json({ error: "Vui lòng nhập tên sân từ 1 đến 120 ký tự." });
+    }
+
+    if (
+      !Number.isSafeInteger(price_per_hour) ||
+      price_per_hour < 0 ||
+      price_per_hour > 9_999_999_999
+    ) {
+      return response.status(400).json({
+        error:
+          "Vui lòng nhập giá thuê theo giờ bằng số nguyên từ 0 đến 9.999.999.999 đồng.",
+      });
+    }
+
+    if (typeof requires_approval !== "boolean") {
+      return response.status(400).json({
+        error: "Vui lòng chọn sân có cần chủ sân duyệt đơn hay không.",
+      });
+    }
+
+    try {
+      const [result] = await db.execute(
+        `
+      UPDATE COURTS AS c
+      JOIN FACILITIES AS f ON f.facility_id = c.facility_id
+      SET c.court_name = ?, c.price_per_hour = ?, c.requires_approval = ?
+      WHERE c.facility_id = ?
+        AND c.court_id = ?
+        AND f.owner_id = ?
+        AND c.deleted_at IS NULL
+        AND f.deleted_at IS NULL
+    `,
+        [
+          name,
+          price_per_hour,
+          requires_approval,
+          facilityId,
+          courtId,
+          request.user.user_id,
+        ],
+      );
+
+      if (result.affectedRows === 0) {
+        return response.status(404).json({
+          error: "Không tìm thấy sân bạn có thể quản lý.",
+        });
+      }
+
+      return response.json({ message: "Đã cập nhật thông tin sân." });
+    } catch (error) {
+      console.error("Lỗi sửa thông tin sân:", error.code || error.message);
+      return response.status(500).json({
+        error: "Chưa thể cập nhật thông tin sân. Vui lòng thử lại.",
+      });
+    }
+  },
+);
 module.exports = router;
