@@ -21,7 +21,6 @@ app.get("/api/health", async (_request, response) => {
     response.status(503).json({ status: "error", database: "unavailable" });
   }
 });
-app.use("/api/facilities", facilitiesRouter);
 app.use(express.json());
 
 app.use(
@@ -37,6 +36,7 @@ app.use(
     },
   }),
 );
+app.use("/api/facilities", facilitiesRouter);
 app.use("/api/facilities", courtsRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/bookings", bookingsRouter);
