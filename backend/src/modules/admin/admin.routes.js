@@ -86,4 +86,49 @@ router.patch(
     }
   },
 );
+router.patch(
+  "/owners/:userId/approve",
+  requireAuth,
+  async (request, response) => {
+    if (request.user.role !== "ADMIN") {
+      return response.status(403).json({
+        error: "Chỉ quản trị viên được duyệt tài khoản chủ sân.",
+      });
+    }
+
+    const { userId } = request.params;
+    if (!/^[1-9][0-9]*$/.test(userId)) {
+      return response.status(400).json({ error: "Mã tài khoản không hợp lệ." });
+    }
+
+    try {
+      const [result] = await db.execute(
+        `
+      UPDATE USERS
+      SET status = 'Active'
+      WHERE user_id = ? AND role = 'OWNER'
+        AND status = 'Inactive' AND deleted_at IS NULL
+    `,
+        [userId],
+      );
+
+      if (result.affectedRows === 0) {
+        return response.status(404).json({
+          error: "Không tìm thấy tài khoản chủ sân đang chờ duyệt.",
+        });
+      }
+
+      return response.json({
+        message: "Đã duyệt tài khoản chủ sân.",
+        status: "Active",
+      });
+    } catch (error) {
+      console.error(
+        "Lỗi duyệt tài khoản chủ sân:",
+        error.code || error.message,
+      );
+      return response.status(500).json({ error: "Chưa thể duyệt tài khoản." });
+    }
+  },
+);
 module.exports = router;
