@@ -219,10 +219,21 @@ async function decideBookingByOwner({ bookingId, ownerId, decision }) {
     }
   }
 }
+async function expirePendingBookings() {
+  const [result] = await db.execute(`
+    UPDATE BOOKINGS
+    SET status = 'Expired'
+    WHERE status = 'Pending'
+      AND hold_expires_at <= sports_court_booking.fn_now_vn()
+  `);
+
+  return result.affectedRows;
+}
 module.exports = {
   createBooking,
   listBookingsByUser,
   cancelBookingByUser,
   listPendingBookingsByOwner,
   decideBookingByOwner,
+  expirePendingBookings,
 };
