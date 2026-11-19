@@ -1,6 +1,7 @@
 const express = require("express");
 const { randomUUID } = require("node:crypto");
 const db = require("../../config/db");
+const { findAvailableCourts } = require("./courts.repository");
 const requireAuth = require("../../middleware/requireAuth");
 
 const router = express.Router();
@@ -334,4 +335,89 @@ router.put(
     }
   },
 );
+function parseSearchTime(value) {
+  if (
+    typeof value !== "string" ||
+    !/^[1-9]\d{3}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value)
+  ) {
+    return null;
+  }
+
+  const dateTime = value.replace(" ", "T");
+  const wallTime = new Date(`${dateTime}:00Z`);
+
+  if (
+    Number.isNaN(wallTime.getTime()) ||
+    wallTime.toISOString().slice(0, 16) !== dateTime
+  ) {
+    return null;
+  }
+
+  return Date.parse(`${dateTime}:00+07:00`);
+}
+
+router.get("/search", async (request, response) => {
+  const { start_time, end_time, district, sport_type, max_price } =
+    request.query;
+
+  const start = parseSearchTime(start_time);
+  const end = parseSearchTime(end_time);
+
+  if (start === null || end === null) {
+    return response.status(400).json({
+      error: "Vui lòng nhập ngày giờ hợp lệ theo dạng YYYY-MM-DD HH:mm.",
+    });
+  }
+
+  const durationMinutes = (end - start) / 60_000;
+
+  if (start <= Date.now() || durationMinutes < 30 || durationMinutes > 720) {
+    return response.status(400).json({
+      error:
+        "Giờ bắt đầu phải ở tương lai và thời lượng phải từ 30 phút đến 12 giờ.",
+    });
+  }
+
+  if (
+    (district !== undefined &&
+      (typeof district !== "string" ||
+        !district.trim() ||
+        district.trim().length > 100)) ||
+    (sport_type !== undefined &&
+      (typeof sport_type !== "string" ||
+        !sport_type.trim() ||
+        sport_type.trim().length > 30))
+  ) {
+    return response.status(400).json({
+      error: "Vui lòng kiểm tra lại phường và môn thể thao đã chọn.",
+    });
+  }
+
+  if (
+    max_price !== undefined &&
+    (typeof max_price !== "string" || !/^\d{1,10}$/.test(max_price))
+  ) {
+    return response.status(400).json({
+      error: "Vui lòng nhập giá tối đa theo giờ bằng số đồng nguyên không âm.",
+    });
+  }
+
+  try {
+    const courts = await findAvailableCourts({
+      startTime: `${start_time}:00`,
+      endTime: `${end_time}:00`,
+      district: district?.trim() ?? null,
+      sportType: sport_type?.trim() ?? null,
+      maxPrice: max_price === undefined ? null : Number(max_price),
+    });
+
+    return response.json(courts);
+  } catch (error) {
+    console.error("Lỗi tìm sân:", error.code || error.message);
+    return response.status(500).json({
+      error: "Chưa thể tìm sân. Vui lòng thử lại.",
+    });
+  }
+});
+
 module.exports = router;

@@ -85,6 +85,7 @@ khi cập nhật các đơn quá hạn giữ chỗ.
 | Đăng ký, đăng nhập, đăng xuất                                   | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`                                                                               |
 | Xem tài khoản đang đăng nhập                                    | `GET /api/auth/me`                                                                                                                                       |
 | Xem cụm sân, sân con và lịch theo ngày                          | `GET /api/facilities`, `GET /api/facilities/:facilityId/courts`, `GET /api/facilities/:facilityId/courts/:courtId/availability?date=YYYY-MM-DD`          |
+| Tìm sân trống theo khung giờ, phường, môn và giá tối đa | `GET /api/facilities/search` |
 | Người chơi đặt, xem và hủy đơn                                  | `POST /api/bookings`, `GET /api/bookings/me`, `POST /api/bookings/:bookingId/cancel`                                                                     |
 | Chủ sân tạo và sửa cụm sân                                      | `POST /api/facilities`, `PUT /api/facilities/:facilityId`                                                                                                |
 | Chủ sân thêm sân, sửa thông tin và đổi trạng thái sân           | `POST /api/facilities/:facilityId/courts`, `PUT /api/facilities/:facilityId/courts/:courtId`, `PATCH /api/facilities/:facilityId/courts/:courtId/status` |
@@ -94,6 +95,24 @@ khi cập nhật các đơn quá hạn giữ chỗ.
 API cần đăng nhập sử dụng cookie phiên do API đăng nhập trả về.
 Trong bản demo, tài khoản quản trị và tài khoản chủ sân chờ duyệt được tạo bằng SQL.
 Tài khoản chủ sân chờ duyệt có trạng thái `Inactive`.
+
+### Tìm sân trống
+
+`GET /api/facilities/search` nhận các tham số sau.
+
+| Tham số | Ý nghĩa |
+| --- | --- |
+| `start_time`, `end_time` | Bắt buộc. Nhập giờ Việt Nam theo dạng `YYYY-MM-DD HH:mm`. Giờ bắt đầu phải ở tương lai và thời lượng phải từ 30 phút đến 12 giờ. |
+| `district` | Tùy chọn. Tên phường được lưu trong `FACILITIES.district`. |
+| `sport_type` | Tùy chọn. Mã môn thể thao, ví dụ `BADMINTON`. |
+| `max_price` | Tùy chọn. Giá thuê tối đa mỗi giờ, tính bằng đồng và bao gồm sân có giá đúng mức tối đa. |
+
+Backend chỉ trả sân đang nhận đặt, mở cửa trong toàn bộ khung giờ yêu cầu và
+không có lượt đặt còn hiệu lực giao với khung giờ đó. Hai lượt đặt có giờ kết
+thúc của lượt trước bằng giờ bắt đầu của lượt sau được phép nằm liền kề.
+Nếu không có sân phù hợp, API trả `[]`. API tạo đơn kiểm tra lại lịch khi ghi.
+
+Tính năng đọc từ `FACILITIES`, `COURTS` và `BOOKINGS` qua các quan hệ hiện có.
 
 ## Kết quả kiểm thử backend
 
@@ -107,3 +126,8 @@ Tài khoản chủ sân chờ duyệt có trạng thái `Inactive`.
   từ chối khi hủy đơn của người khác hoặc gọi API quản trị.
 - **Hết hạn giữ chỗ.** Backend tự chuyển đơn `Pending` đã quá hạn sang `Expired`.
 - **Bảo trì sân.** Sân ở trạng thái `Maintenance` từ chối yêu cầu đặt mới.
+- **Tìm sân trống.** Khi lọc sân cầu lông ở `Phuong Mau`, sân giá 150.000 đồng/giờ
+  xuất hiện ở mức tối đa 150.000 đồng/giờ và bị loại khi giảm mức tối đa xuống
+  120.000 đồng/giờ. Lượt giữ chỗ 18:30–19:30 loại sân số `4` khỏi khung
+  18:00–19:00, còn khung 18:00–18:30 vẫn trả về sân đó. Sau khi hủy đơn thử,
+  truy vấn khung 18:00–19:00 trả về sân số `4` trở lại.
