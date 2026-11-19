@@ -20,6 +20,41 @@ router.get("/", async (_request, response) => {
     response.status(500).json({ error: "Không thể lấy danh sách cụm sân." });
   }
 });
+router.get("/sports", async (_request, response) => {
+  try {
+    const [sports] = await db.query(
+      "SELECT sport_code, name FROM sports WHERE is_active = 1 ORDER BY name, sport_code",
+    );
+    return response.json(sports);
+  } catch (error) {
+    console.error("Lỗi lấy danh sách môn thể thao:", error.code || error.message);
+    return response.status(500).json({ error: "Không thể lấy danh sách môn thể thao." });
+  }
+});
+
+router.get("/mine", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") {
+    return response.status(403).json({
+      error: "Chỉ chủ sân được xem danh sách cụm sân của mình.",
+    });
+  }
+
+  try {
+    const [facilities] = await db.execute(
+      `SELECT facility_id, facility_name, address, district, city, hotline,
+              open_time, close_time, is_overnight, is_active
+       FROM FACILITIES
+       WHERE owner_id = ? AND deleted_at IS NULL
+       ORDER BY facility_name, facility_id`,
+      [request.user.user_id],
+    );
+    return response.json(facilities);
+  } catch (error) {
+    console.error("Lỗi lấy danh sách cụm sân của chủ sân:", error.code || error.message);
+    return response.status(500).json({ error: "Không thể lấy danh sách cụm sân." });
+  }
+});
+
 router.post("/", requireAuth, async (request, response) => {
   if (request.user.role !== "OWNER") {
     return response.status(403).json({

@@ -2,6 +2,7 @@ const express = require("express");
 const { randomUUID } = require("node:crypto");
 const db = require("../../config/db");
 const { findAvailableCourts } = require("./courts.repository");
+const { getDirectoryAvailability } = require("./directory-availability");
 const requireAuth = require("../../middleware/requireAuth");
 
 const router = express.Router();
@@ -357,7 +358,7 @@ function parseSearchTime(value) {
 }
 
 router.get("/search", async (request, response) => {
-  const { start_time, end_time, district, sport_type, max_price } =
+  const { start_time, end_time, district, sport_type, max_price, include_status, directory } =
     request.query;
 
   const start = parseSearchTime(start_time);
@@ -403,12 +404,22 @@ router.get("/search", async (request, response) => {
   }
 
   try {
+    if (directory === "1") {
+      const venues = await getDirectoryAvailability({
+        startTime: `${start_time}:00`,
+        endTime: `${end_time}:00`,
+        sportType: sport_type?.trim(),
+      });
+      if (!venues) return response.status(400).json({ error: "Vui lòng chọn một môn trong danh bạ." });
+      return response.json({ venues });
+    }
     const courts = await findAvailableCourts({
       startTime: `${start_time}:00`,
       endTime: `${end_time}:00`,
       district: district?.trim() ?? null,
       sportType: sport_type?.trim() ?? null,
       maxPrice: max_price === undefined ? null : Number(max_price),
+      includeStatus: include_status === "1",
     });
 
     return response.json(courts);

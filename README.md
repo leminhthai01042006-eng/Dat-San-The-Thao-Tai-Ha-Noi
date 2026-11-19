@@ -1,3 +1,101 @@
+# CourtPulse
+
+CourtPulse hỗ trợ tìm và đặt sân thể thao tại Hà Nội. Có ba khu vực theo vai trò: người chơi xem lịch của mình, chủ sân quản lý sân và duyệt đơn, quản trị viên quản lý tài khoản.
+
+## Chạy website trên Windows
+
+1. Khởi động MySQL và backend theo phần bên dưới. Nếu backend đang chạy từ phiên trước, dừng bằng `Ctrl+C` rồi khởi động lại để nạp các API mới.
+2. Mở terminal PowerShell thứ hai trong thư mục gốc của repo.
+
+   ```powershell
+   Set-Location frontend
+   npm.cmd ci
+   npm.cmd run dev
+   ```
+
+3. Mở [CourtPulse trên cổng 5173](http://localhost:5173), hoặc dùng địa chỉ do Vite in ra. Vite chuyển các yêu cầu `/api` sang backend trên cổng `3000` và dùng chung địa chỉ cho cookie phiên. Nếu đổi cổng backend bằng biến môi trường `PORT`, đặt `COURTPULSE_API_TARGET` ở terminal frontend theo địa chỉ backend tương ứng.
+
+Trong thư mục `frontend`, dùng `npm.cmd run lint` để kiểm tra mã và `npm.cmd run build` để tạo bản dựng.
+
+## Hạng mục giao diện cho báo cáo
+
+- **Trang chủ.** Ảnh sân minh họa riêng và số liệu từ danh bạ hiện có. Bộ lọc khu vực, môn, ngày giờ và giá tối đa nằm ở trang tìm sân trống. Số liệu xuất hiện khi cuộn nhờ [Count Up của React Bits](https://reactbits.dev/text-animations/count-up), kèm [giấy phép](frontend/REACT-BITS-LICENSE.md).
+- **Người chơi.** Đăng ký, đăng nhập, xem khung giờ đã có lịch, giữ chỗ và xem hoặc hủy lượt đặt theo điều kiện của backend. Lịch hiển thị riêng tình trạng giữ chỗ và xác nhận của chủ sân.
+- **Chủ sân.** Thêm và sửa cụm sân, thêm và sửa sân con, đổi trạng thái sân, duyệt hoặc từ chối lượt đặt. Quản trị viên xem tài khoản, duyệt chủ sân và khóa hoặc mở khóa tài khoản.
+- **Thống kê.** Các thẻ số và biểu đồ thanh hiển thị số lượng theo trạng thái. Lịch của người chơi và danh sách chờ duyệt tối đa 50 bản ghi. Danh sách quản trị tối đa 100 tài khoản. Trang doanh thu tổng hợp theo kỳ đã chọn.
+- **API bổ sung.** `GET /api/facilities/mine` đọc cụm sân thuộc chủ sân đang đăng nhập. `GET /api/facilities/sports` đọc các môn đang hoạt động từ bảng danh mục `sports` có sẵn. `GET /api/bookings/me` trả thêm `court_id` và `hold_expires_at` để đếm số sân và hiển thị đúng thời hạn giữ chỗ.
+- **Mô hình dữ liệu.** Giữ nguyên bốn bảng lõi `USERS`, `FACILITIES`, `COURTS`, `BOOKINGS` và các quan hệ 1–N. Đối soát chuyển khoản dùng bảng `payments` và các trigger hiện có.
+- **Tham khảo thiết kế.** Bố cục trang chủ dùng ảnh nổi bật, chữ lớn và tương phản mạnh theo hướng của [OpenAI Codex](https://openai.com/vi-VN/codex/) và [NVIDIA](https://www.nvidia.com/en-us/). Trình tự chọn sân, đặt lịch và duyệt đơn tham khảo [hướng dẫn ALOBO](https://wiki.alobo.vn/article/huong-dan-dat-lich-online-va-duyet-don/).
+
+### Bản giao diện nhiều trang
+
+| Trang | Đường dẫn |
+| --- | --- |
+| Trang chủ và phần giới thiệu | `/`, `/gioi-thieu` |
+| Chọn môn, danh bạ theo môn và chi tiết địa điểm | `/tim-san`, `/tim-san/:mon`, `/san/:diaDiem` |
+| Tìm giờ trống và đặt qua CourtPulse | `/san-trong`, `/san-trong/:mon`, `/dat-san/:facilityId/:courtId` |
+| Trang hoàn tất và lịch của người chơi | `/hoan-tat/:bookingId`, `/lich-cua-toi` |
+| Quản lý và tổng quan doanh thu | `/quan-ly`, `/tong-quan` |
+
+- Danh bạ có 36 mục tham khảo cho bóng bàn, cầu lông, bóng chuyền và pickleball. Dữ liệu danh bạ lưu trong frontend, có nguồn theo địa điểm, giá tham khảo khi tìm được và liên kết chỉ đường Google Maps. Ảnh dùng để minh họa từng môn. Địa điểm nhận đặt qua CourtPulse được quản lý riêng bằng dữ liệu sân thật trong MySQL.
+- Luồng đặt sân gồm chọn giờ, kiểm tra đơn, thanh toán và hoàn tất. Khách có thể chọn chuyển khoản tại cụm sân đã thiết lập tài khoản nhận. Đơn được ghi nhận đã thanh toán sau khi chủ sân đối chiếu sao kê.
+- `GET /api/bookings/:bookingId/receipt` đọc chi tiết đơn của người chơi đang đăng nhập. `GET /api/bookings/revenue?days=7|30|90` đọc tổng hợp từ `payments` và `BOOKINGS`. Chủ sân chỉ xem số liệu cụm sân mình sở hữu. Quản trị viên xem toàn hệ thống. Kỳ thu và hoàn dựa trên ngày giao dịch, số lượt đặt dựa trên ngày chơi.
+- Các trang bổ sung dùng các bảng và quan hệ hiện có. Khi muốn chủ sân tạo sân con cho đủ bốn môn, tài khoản quản trị MySQL có thể bổ sung các mã còn thiếu vào bảng danh mục `sports`.
+
+  ```sql
+  INSERT IGNORE INTO sports_court_booking.sports (sport_code, name)
+  VALUES ('TABLE_TENNIS', 'Bóng bàn'), ('BADMINTON', 'Cầu lông'),
+         ('VOLLEYBALL', 'Bóng chuyền'), ('PICKLEBALL', 'Pickleball');
+  ```
+
+### Trạng thái sân theo khung giờ
+
+- Sau khi tìm khung giờ, trang hiển thị số sân còn trống, số sân đã có lịch và tổng lượt giữ chỗ hoặc đã đặt. Sân được tính theo giờ mở cửa và các bộ lọc đang chọn. Mỗi sân có lịch được đếm một lần, kể cả khi một khung giờ dài giao với nhiều lượt đặt trên sân đó.
+- Số liệu tự tải lại khoảng 10 giây một lần và khi quay lại cửa sổ. Đơn đã hủy hoặc hết hạn giữ chỗ được loại ngay khi truy vấn. Danh bạ tham khảo chỉ có số chỗ cho sân thực sự nhận lịch qua CourtPulse.
+- `GET /api/facilities/search?include_status=1` trả cả sân đã có lịch, kèm `booking_count`. Gọi API không có tham số này vẫn trả danh sách sân trống.
+
+### Lịch và thanh toán trên bốn trang danh bạ
+
+- Cả 36 thẻ của bốn môn dùng chung khung giờ đang chọn. Địa điểm đã liên kết hiển thị số sân trống, số sân có lịch, số lượt đặt và trạng thái hỗ trợ chuyển khoản. Trang chi tiết liệt kê sân con còn trống để vào bước đặt sân của CourtPulse. Danh bạ giữ nguyên khung giờ khi đổi môn hoặc mở chi tiết.
+- Địa điểm dùng hệ thống bên ngoài dẫn tới kênh đặt sân công khai hoặc trang liên hệ của sân. CourtPulse chỉ hiển thị số chỗ hiện tại khi có lịch được đăng ký trực tiếp trên hệ thống. Các đường dẫn bổ sung được đối chiếu với [ALOBO](https://www.alobo.vn/san-pickleball-o-ha-noi-dang-de-trai-nghiem/), [LOOL](https://lool.vn/san/cau-long-ha-noi/) và [MPA Pickleball](https://mpapickleball.com/lien-he).
+- Sau khi xác minh chủ sân đã đăng ký đúng cụm sân và môn trong MySQL, người vận hành khai báo liên kết trong `backend/.env`. Khóa là phần cuối đường dẫn `/san/...`. Giá trị là `FACILITIES.facility_id` tương ứng. Khởi động lại backend sau khi cấu hình.
+
+  ```dotenv
+  COURTPULSE_DIRECTORY_LINKS='{"pickleball-vu-duc-than":"ID_CUM_SAN_DA_XAC_MINH","cau-long-kim-giang":"ID_CUM_SAN_DA_XAC_MINH"}'
+  ```
+
+  API đọc dùng `GET /api/facilities/search?directory=1&sport_type=...` với cùng tham số thời gian. Chuyển khoản tiếp tục dùng tài khoản thụ hưởng của chủ sân và bước đối soát hiện có. Các liên kết nằm trong cấu hình và dùng các bảng hiện có.
+
+### Bật nhận chuyển khoản
+
+1. Xác minh tài khoản nhận tiền với chủ sân, rồi đặt cấu hình trong `backend/.env`. Khóa ngoài cùng là `USERS.user_id` của chủ sân. Điền các giá trị thực thay cho mẫu và khởi động lại backend.
+
+   ```dotenv
+   COURTPULSE_BANK_ACCOUNTS='{"ID_CHU_SAN":{"bank":"TEN_NGAN_HANG","accountNumber":"SO_TAI_KHOAN","accountName":"TEN_CHU_TAI_KHOAN"}}'
+   ```
+
+2. Tài khoản quản trị MySQL cấp quyền ghi sổ thanh toán cho tài khoản ứng dụng. Backend chỉ hiện chuyển khoản khi có cấu hình hợp lệ và có quyền ghi.
+
+   ```sql
+   GRANT INSERT (booking_id, processed_by, payment_type, payment_method, amount,
+                 transaction_ref, payment_status)
+   ON sports_court_booking.payments
+   TO 'courtpulse_app'@'localhost';
+   ```
+
+3. Người chơi chọn chuyển khoản và giữ chỗ. Khi đơn được duyệt và còn hiệu lực, chi tiết đơn hiện tên ngân hàng, tài khoản nhận, số tiền còn phải trả, nội dung `CP<mã số đơn>` và hạn đối soát. Người chơi chuyển tiền trên ứng dụng ngân hàng.
+4. Chủ sân vào **Quản lý → Đối soát chuyển khoản**. Đối chiếu tài khoản nhận, nội dung, số tiền và mã giao dịch trên sao kê trước khi xác nhận. Backend ghi một dòng vào `payments` và chuyển đơn sang `Fully_Paid` trong cùng giao dịch MySQL. Nếu đơn đã hết hiệu lực, chủ sân cần xử lý khoản đã nhận với người chuyển.
+
+API hỗ trợ gồm `GET /api/bookings/transfer-options/:facilityId`, `GET /api/bookings/transfers-to-reconcile` và `POST /api/bookings/:bookingId/confirm-transfer`. Đây là luồng đối soát thủ công. Doanh thu sử dụng số tiền đã ghi nhận.
+
+### Kiểm thử giao diện
+
+- Lint và build Vite chạy thành công. Kiểm tra trên Edge ở các chiều rộng 1440, 390 và 320 px.
+- Đã kiểm tra bốn trang theo môn, lọc địa điểm, liên kết Google Maps, hiệu ứng số khi cuộn, tìm giờ trống, đăng nhập và các bước đặt sân.
+- MySQL cục bộ phục vụ tra cứu lịch, đọc lại chi tiết đơn và báo cáo doanh thu cho chủ sân, quản trị viên. Đã kiểm tra người chơi bị từ chối khi gọi báo cáo hoặc đọc đơn của người khác. Lệnh gửi đơn được mô phỏng phản hồi khi kiểm thử giao diện để giữ dữ liệu demo hiện có.
+- Kiểm thử đầu cuối bằng Edge và MySQL tạm xác nhận đặt thêm một lượt làm tăng số đếm, hủy và hết hạn giải phóng sân, người không có quyền bị từ chối khi đối soát, số tiền sai bị từ chối, cùng mã giao dịch chỉ ghi một lần và số tiền đã nhận lên báo cáo doanh thu. Các giao dịch kiểm thử dùng tài khoản giả lập trong cơ sở dữ liệu tạm.
+- Với danh bạ, đã kiểm tra dữ liệu liên kết cho cả bốn môn trên MySQL tạm, giữ khung giờ tới trang đặt sân, hiển thị hướng dẫn chuyển khoản khi đủ điều kiện và tự cập nhật số chỗ sau khi hủy đơn. Địa điểm ngoài hệ thống mở đúng kênh bên ngoài và không có số chỗ do CourtPulse tự tính.
+
 ## Chạy backend trên Windows
 
 1. Chuẩn bị Node.js và MySQL 8.4.

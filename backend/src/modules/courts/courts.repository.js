@@ -6,7 +6,11 @@ async function findAvailableCourts({
   district = null,
   sportType = null,
   maxPrice = null,
+  includeStatus = false,
+  facilityIds = null,
 }) {
+  if (facilityIds?.length === 0) return [];
+  const facilityFilter = facilityIds ? "AND f.facility_id IN (" + facilityIds.map(() => "?").join(",") + ")" : "";
   const [courts] = await db.execute(
     `
     WITH requested_time AS (
@@ -34,29 +38,31 @@ async function findAvailableCourts({
         AND (? IS NULL OR f.district = ?)
         AND (? IS NULL OR c.sport_type = ?)
         AND (? IS NULL OR c.price_per_hour <= ?)
+        ${facilityFilter}
+    ),
+    court_status AS (
+      SELECT m.court_id, m.court_name, m.sport_type, m.price_per_hour,
+             m.requires_approval, m.facility_id, m.facility_name,
+             m.address, m.district,
+             (SELECT COUNT(*)
+              FROM BOOKINGS AS b
+              WHERE b.court_id = m.court_id
+                AND b.is_active_slot = 1
+                AND (b.status <> 'Pending'
+                     OR b.hold_expires_at > TIMESTAMPADD(HOUR, 7, UTC_TIMESTAMP()))
+                AND b.start_time < m.ends_at
+                AND b.end_time > m.starts_at) AS booking_count
+      FROM matching_courts AS m
+      WHERE m.starts_at >= TIMESTAMP(m.operating_date, m.open_time)
+        AND m.ends_at <= TIMESTAMP(
+          DATE_ADD(m.operating_date, INTERVAL m.is_overnight DAY),
+          m.close_time
+        )
     )
-    SELECT m.court_id, m.court_name, m.sport_type, m.price_per_hour,
-           m.requires_approval, m.facility_id, m.facility_name,
-           m.address, m.district
-    FROM matching_courts AS m
-    WHERE m.starts_at >= TIMESTAMP(m.operating_date, m.open_time)
-      AND m.ends_at <= TIMESTAMP(
-        DATE_ADD(m.operating_date, INTERVAL m.is_overnight DAY),
-        m.close_time
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM BOOKINGS AS b
-        WHERE b.court_id = m.court_id
-          AND b.is_active_slot = 1
-          AND (
-            b.status <> 'Pending'
-            OR b.hold_expires_at > TIMESTAMPADD(HOUR, 7, UTC_TIMESTAMP())
-          )
-          AND b.start_time < m.ends_at
-          AND b.end_time > m.starts_at
-      )
-    ORDER BY m.price_per_hour, m.court_id
+    SELECT *
+    FROM court_status
+    WHERE ? OR booking_count = 0
+    ORDER BY price_per_hour, court_id
   `,
     [
       startTime,
@@ -67,10 +73,12 @@ async function findAvailableCourts({
       sportType,
       maxPrice,
       maxPrice,
+      ...(facilityIds ?? []),
+      includeStatus ? 1 : 0,
     ],
   );
 
-  return courts;
+  return includeStatus ? courts : courts.map(({ booking_count: _count, ...court }) => court);
 }
 
 module.exports = { findAvailableCourts };

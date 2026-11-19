@@ -1,7 +1,15 @@
 const express = require("express");
 const requireAuth = require("../../middleware/requireAuth");
+const { getRevenue } = require("./revenue.repository");
+const {
+  getReceivingAccount,
+  transferAvailableForFacility,
+  listTransfersToReconcile,
+  confirmTransfer,
+} = require("./bank-transfer");
 const {
   createBooking,
+  findBookingByUser,
   listBookingsByUser,
   cancelBookingByUser,
   listPendingBookingsByOwner,
@@ -9,6 +17,77 @@ const {
 } = require("./bookings.repository");
 
 const router = express.Router();
+
+router.get("/transfer-options/:facilityId", async (request, response) => {
+  const { facilityId } = request.params;
+  if (!/^[1-9]\d{0,19}$/.test(facilityId)) return response.status(400).json({ error: "Mã cụm sân không hợp lệ." });
+  try {
+    return response.json({ available: await transferAvailableForFacility(facilityId) });
+  } catch (error) {
+    console.error("Lỗi tra cứu chuyển khoản:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể kiểm tra phương thức chuyển khoản." });
+  }
+});
+
+router.get("/transfers-to-reconcile", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") return response.status(403).json({ error: "Chỉ chủ sân có thể đối soát chuyển khoản." });
+  try {
+    return response.json(await listTransfersToReconcile(request.user.user_id));
+  } catch (error) {
+    console.error("Lỗi tải danh sách đối soát:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể tải danh sách đối soát." });
+  }
+});
+
+router.post("/:bookingId/confirm-transfer", requireAuth, async (request, response) => {
+  if (request.user.role !== "OWNER") return response.status(403).json({ error: "Chỉ chủ sân có thể xác nhận tiền đã nhận." });
+  const { bookingId } = request.params;
+  const { reference, amount, verified } = request.body ?? {};
+  if (!/^[1-9]\d{0,19}$/.test(bookingId) || typeof reference !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9./_-]{2,63}$/.test(reference.trim()) ||
+      !Number.isSafeInteger(amount) || amount < 1 || amount > 9_999_999_999 || verified !== true) {
+    return response.status(400).json({ error: "Nhập số tiền nguyên đồng, mã giao dịch ngân hàng và xác nhận đã đối chiếu." });
+  }
+  try {
+    const result = await confirmTransfer({ bookingId, ownerId: request.user.user_id, reference: reference.trim(), amount });
+    if (result === "confirmed") return response.json({ message: "Đã ghi nhận chuyển khoản và xác nhận thanh toán." });
+    if (result === "disabled") return response.status(409).json({ error: "Cụm sân chưa bật nhận chuyển khoản." });
+    if (result === "not-found") return response.status(404).json({ error: "Không tìm thấy đơn thuộc cụm sân của bạn." });
+    const messages = {
+      closed: "Đơn đã hết hiệu lực hoặc chưa đủ điều kiện. Hãy rà soát khoản tiền đã nhận với người chuyển.",
+      duplicate: "Mã giao dịch này đã được ghi nhận. Hãy kiểm tra lại sao kê.",
+      "wrong-amount": "Số tiền trên sao kê phải khớp với số tiền còn phải trả.",
+      conflict: "Đơn vừa thay đổi hoặc khung giờ đang được xử lý. Hãy làm mới và kiểm tra lại.",
+    };
+    return response.status(409).json({ error: messages[result] });
+  } catch (error) {
+    console.error("Lỗi đối soát chuyển khoản:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể ghi nhận chuyển khoản. Vui lòng thử lại." });
+  }
+});
+
+router.get("/revenue", requireAuth, async (request, response) => {
+  const { role, user_id: userId } = request.user;
+  if (!["OWNER", "ADMIN"].includes(role)) {
+    return response.status(403).json({ error: "Tài khoản này không có quyền xem doanh thu." });
+  }
+  const days = request.query.days ?? "30";
+  if (!["7", "30", "90"].includes(days)) {
+    return response.status(400).json({ error: "Chọn khoảng thời gian 7, 30 hoặc 90 ngày." });
+  }
+
+  const day = 86_400_000;
+  const vnNow = Date.now() + 7 * 3_600_000;
+  const start = new Date(vnNow - (Number(days) - 1) * day).toISOString().slice(0, 10);
+  const end = new Date(vnNow + day).toISOString().slice(0, 10);
+  try {
+    const data = await getRevenue({ ownerId: role === "OWNER" ? userId : null, start, end });
+    return response.json({ start, end, ...data });
+  } catch (error) {
+    console.error("Lỗi lấy báo cáo doanh thu:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể tải báo cáo doanh thu." });
+  }
+});
 
 function parseVietnamTime(value) {
   if (
@@ -104,6 +183,28 @@ router.get("/me", requireAuth, async (request, response) => {
     return response
       .status(500)
       .json({ error: "Không thể lấy danh sách đơn đặt sân." });
+  }
+});
+router.get("/:bookingId/receipt", requireAuth, async (request, response) => {
+  const { bookingId } = request.params;
+  if (!/^[1-9][0-9]*$/.test(bookingId)) return response.status(404).json({ error: "Không tìm thấy đơn đặt sân." });
+
+  try {
+    const found = await findBookingByUser(request.user.user_id, bookingId);
+    if (!found) return response.status(404).json({ error: "Không tìm thấy đơn đặt sân." });
+    const { owner_id, can_transfer, transfer_deadline, ...booking } = found;
+    const account = can_transfer ? await getReceivingAccount(owner_id) : null;
+    const transfer = account ? {
+      ...account,
+      note: "CP" + booking.booking_id,
+      amount: booking.remaining_amount,
+      deadline: transfer_deadline,
+    } : null;
+    response.set("Cache-Control", "no-store");
+    return response.json({ ...booking, transfer });
+  } catch (error) {
+    console.error("Lỗi đọc đơn đặt sân:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể đọc đơn đặt sân." });
   }
 });
 router.post("/:bookingId/cancel", requireAuth, async (request, response) => {

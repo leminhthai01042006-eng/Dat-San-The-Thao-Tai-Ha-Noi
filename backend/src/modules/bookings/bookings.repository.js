@@ -1,5 +1,6 @@
 const { randomBytes } = require("node:crypto");
 const db = require("../../config/db");
+const { transferEligibility } = require("./bank-transfer");
 
 async function createBooking({ userId, courtId, startTime, endTime }) {
   const bookingCode = randomBytes(16).toString("hex");
@@ -35,7 +36,7 @@ async function createBooking({ userId, courtId, startTime, endTime }) {
 
     const [bookings] = await connection.execute(
       `
-      SELECT booking_id, booking_code, court_id, status, approval_status,
+      SELECT booking_id, booking_code, court_id, status, approval_status, total_amount,
              DATE_FORMAT(hold_expires_at, '%Y-%m-%d %H:%i:%s') AS hold_expires_at
       FROM BOOKINGS
       WHERE booking_code = ?
@@ -63,10 +64,12 @@ async function listBookingsByUser(userId) {
     `
     SELECT b.booking_id,
            b.booking_code,
+           b.court_id,
            c.court_name,
            f.facility_name,
            DATE_FORMAT(b.start_time, '%Y-%m-%d %H:%i:%s') AS start_time,
            DATE_FORMAT(b.end_time, '%Y-%m-%d %H:%i:%s') AS end_time,
+           DATE_FORMAT(b.hold_expires_at, '%Y-%m-%d %H:%i:%s') AS hold_expires_at,
            b.status,
            b.approval_status
     FROM BOOKINGS AS b
@@ -80,6 +83,24 @@ async function listBookingsByUser(userId) {
   );
 
   return bookings;
+}
+
+async function findBookingByUser(userId, bookingId) {
+  const [rows] = await db.execute(
+    `SELECT b.booking_id, b.booking_code, b.status, b.approval_status,
+            b.total_amount, b.paid_amount, b.remaining_amount, c.court_name, f.facility_name,
+            f.owner_id, CASE WHEN ${transferEligibility} THEN 1 ELSE 0 END AS can_transfer,
+            DATE_FORMAT(b.start_time, '%Y-%m-%d %H:%i:%s') AS start_time,
+            DATE_FORMAT(b.end_time, '%Y-%m-%d %H:%i:%s') AS end_time,
+            DATE_FORMAT(b.hold_expires_at, '%Y-%m-%d %H:%i:%s') AS hold_expires_at,
+            DATE_FORMAT(LEAST(b.hold_expires_at, b.start_time), '%Y-%m-%d %H:%i:%s') AS transfer_deadline
+     FROM BOOKINGS AS b
+     JOIN COURTS AS c ON c.court_id = b.court_id
+     JOIN FACILITIES AS f ON f.facility_id = b.facility_id
+     WHERE b.user_id = ? AND b.booking_id = ?`,
+    [userId, bookingId],
+  );
+  return rows[0] ?? null;
 }
 
 async function cancelBookingByUser({ bookingId, userId }) {
@@ -230,6 +251,7 @@ async function expirePendingBookings() {
   return result.affectedRows;
 }
 module.exports = {
+  findBookingByUser,
   createBooking,
   listBookingsByUser,
   cancelBookingByUser,
