@@ -5,7 +5,7 @@
 -- * Chỉ dùng cho CÀI MỚI, không DROP bảng; CREATE TABLE sẽ lỗi nếu bảng đã tồn tại.
 --   DB đang chạy cần migration ALTER riêng, KHÔNG chạy file này lên production hiện có.
 -- * Mục 9 (function/procedure/trigger) dùng DROP ... IF EXISTS nên chạy lại được nhiều lần.
--- * Chạy: mysql --default-character-set=utf8mb4 < schema_v3_clean.sql
+-- * Chạy: mysql --default-character-set=utf8mb4 < csdl.sql
 --
 -- GIAO THỨC BẮT BUỘC PHÍA ỨNG DỤNG:
 --   1. Mỗi kết nối: SET time_zone = '+07:00'; SET @app_user_id = <user_id>;
@@ -20,6 +20,12 @@
 --      payments, booking_addons). Refund là dòng payments riêng (payment_type='Refund', 'Success'),
 --      chỉ cho đơn Cancelled/Expired.
 --   6. Job dọn đơn hết hạn dùng fn_now_vn() thay NOW().
+--   7. Thời lượng đặt (slot_minutes, min/max) và hạn hủy (cancel_before_minutes)
+--      là cấu hình của chủ sân trên FACILITIES. Khách hủy trễ nhận CANCEL_WINDOW_CLOSED.
+--      Chủ sân của cụm đó, ADMIN và STAFF (theo @app_user_id) không bị hạn hủy.
+--
+-- 3NF: quận/thành phố nằm ở districts. facility_id chỉ ở FACILITIES, COURTS và services.
+--   BOOKINGS, booking_series, booking_addons không lưu facility_id (suy ra từ sân hoặc dịch vụ).
 --
 -- CHUYỂN TRẠNG THÁI BOOKING (trigger chặn mọi cặp khác):
 --   Pending      -> Deposit_Paid | Fully_Paid | Cancelled | Expired (chỉ khi đã quá hold_expires_at)
@@ -45,7 +51,7 @@ USE `sports_court_booking`;
 
 -- =====================================================================================
 -- 1. BẢNG USERS
--- Xóa mềm qua deleted_at; SĐT được trigger chuẩn hóa (0xxx = +84xxx), phone_norm là khóa UNIQUE.
+-- Xóa mềm qua deleted_at. Trigger đưa SĐT về dạng 0xxxxxxxxx trước khi CHECK và UNIQUE.
 -- =====================================================================================
 CREATE TABLE `USERS` (
   `user_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -53,39 +59,59 @@ CREATE TABLE `USERS` (
   `email` VARCHAR(150) NOT NULL,
   `phone` VARCHAR(20) NOT NULL,
   `password_hash` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-  `role` ENUM('USER', 'OWNER', 'ADMIN', 'Staff') NOT NULL DEFAULT 'USER',
+  `role` ENUM('USER', 'OWNER', 'ADMIN', 'STAFF') NOT NULL DEFAULT 'USER',
   `status` ENUM('Active', 'Locked', 'Inactive') NOT NULL DEFAULT 'Active',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `active_flag` TINYINT GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, 1, NULL)) VIRTUAL,
-  `phone_norm` VARCHAR(20) GENERATED ALWAYS AS (
-    CASE WHEN LEFT(`phone`, 3) = '+84' THEN CONCAT('0', SUBSTRING(`phone`, 4)) ELSE `phone` END
-  ) VIRTUAL,
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `uq_users_email_active` (`email`, `active_flag`),
-  UNIQUE KEY `uq_users_phone_active` (`phone_norm`, `active_flag`),
+  UNIQUE KEY `uq_users_phone_active` (`phone`, `active_flag`),
   KEY `idx_users_role_status` (`role`, `status`, `deleted_at`),
   CONSTRAINT `chk_users_full_name` CHECK (TRIM(`full_name`) <> ''),
   CONSTRAINT `chk_users_phone_vn` CHECK (REGEXP_LIKE(`phone`, '^(0|\\+84)(3|5|7|8|9)[0-9]{8}$'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================================
--- 2. BẢNG VENUES
--- Giờ mở/đóng cửa có CHECK; manager được trigger kiểm tra (mục 9).
+-- 2. BẢNG DISTRICTS, FACILITIES
+-- Quận thuộc thành phố (districts). Cụm sân chỉ tham chiếu district_id.
+-- Chủ sân cấu hình giờ mở cửa, bước/thời lượng đặt và hạn hủy đơn.
 -- =====================================================================================
+CREATE TABLE `districts` (
+  `district_id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `district_name` VARCHAR(100) NOT NULL,
+  `city` VARCHAR(100) NOT NULL DEFAULT 'Hà Nội',
+  PRIMARY KEY (`district_id`),
+  UNIQUE KEY `uq_districts_name_city` (`district_name`, `city`),
+  CONSTRAINT `chk_districts_name` CHECK (TRIM(`district_name`) <> ''),
+  CONSTRAINT `chk_districts_city` CHECK (TRIM(`city`) <> '')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `districts` (`district_name`) VALUES
+  ('Ba Đình'), ('Hoàn Kiếm'), ('Tây Hồ'), ('Long Biên'), ('Cầu Giấy'),
+  ('Đống Đa'), ('Hai Bà Trưng'), ('Hoàng Mai'), ('Thanh Xuân'), ('Hà Đông'),
+  ('Sơn Tây'), ('Nam Từ Liêm'), ('Bắc Từ Liêm'), ('Ba Vì'), ('Chương Mỹ'),
+  ('Đan Phượng'), ('Đông Anh'), ('Gia Lâm'), ('Hoài Đức'), ('Mê Linh'),
+  ('Mỹ Đức'), ('Phú Xuyên'), ('Phúc Thọ'), ('Quốc Oai'), ('Sóc Sơn'),
+  ('Thạch Thất'), ('Thanh Oai'), ('Thanh Trì'), ('Thường Tín'), ('Ứng Hòa');
+
 CREATE TABLE `FACILITIES` (
   `facility_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `venue_code` VARCHAR(30) NOT NULL,
+  `facility_code` VARCHAR(30) NOT NULL,
   `facility_name` VARCHAR(150) NOT NULL,
+  `description` VARCHAR(2000) NULL,
+  `image_url` VARCHAR(500) NULL,
   `address` VARCHAR(255) NOT NULL,
-  `district` VARCHAR(100) NOT NULL,
-  `city` VARCHAR(100) NOT NULL,
-  `timezone` VARCHAR(50) NOT NULL DEFAULT 'Asia/Ho_Chi_Minh' COMMENT 'Hiện chỉ hỗ trợ Asia/Ho_Chi_Minh (xem CHECK)',
+  `district_id` SMALLINT UNSIGNED NOT NULL,
   `hotline` VARCHAR(20) NOT NULL,
   `open_time` TIME NOT NULL DEFAULT '05:00:00' COMMENT 'Giờ mở cửa (giờ VN)',
   `close_time` TIME NOT NULL DEFAULT '23:30:00',
   `is_overnight` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 nếu đóng cửa qua 00:00 hôm sau',
+  `slot_minutes` SMALLINT UNSIGNED NOT NULL DEFAULT 60 COMMENT 'Bước thời lượng đặt sân (phút), do chủ sân đặt',
+  `min_booking_minutes` SMALLINT UNSIGNED NOT NULL DEFAULT 60 COMMENT 'Thời lượng đặt tối thiểu (phút)',
+  `max_booking_minutes` SMALLINT UNSIGNED NOT NULL DEFAULT 240 COMMENT 'Thời lượng đặt tối đa (phút)',
+  `cancel_before_minutes` SMALLINT UNSIGNED NOT NULL DEFAULT 120 COMMENT 'Khách chỉ hủy được khi còn ít nhất bấy nhiêu phút trước giờ bắt đầu. 0 = đến sát giờ bắt đầu',
   `owner_id` BIGINT UNSIGNED NOT NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -93,38 +119,53 @@ CREATE TABLE `FACILITIES` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `active_flag` TINYINT GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, 1, NULL)) VIRTUAL,
   PRIMARY KEY (`facility_id`),
-  UNIQUE KEY `uq_venues_code_active` (`venue_code`, `active_flag`),
-  KEY `idx_venues_location` (`city`, `district`, `is_active`, `deleted_at`),
-  KEY `idx_venues_manager` (`owner_id`),
-  CONSTRAINT `fk_venues_manager` FOREIGN KEY (`owner_id`) REFERENCES `USERS` (`user_id`)
+  UNIQUE KEY `uq_facilities_code_active` (`facility_code`, `active_flag`),
+  KEY `idx_facilities_district` (`district_id`, `is_active`, `deleted_at`),
+  KEY `idx_facilities_owner` (`owner_id`),
+  CONSTRAINT `fk_facilities_district` FOREIGN KEY (`district_id`) REFERENCES `districts` (`district_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_venues_hours` CHECK (
+  CONSTRAINT `fk_facilities_owner` FOREIGN KEY (`owner_id`) REFERENCES `USERS` (`user_id`)
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_facilities_hours` CHECK (
     (`is_overnight` = 0 AND `close_time` > `open_time`)
     OR (`is_overnight` = 1 AND `close_time` <= `open_time`)
   ),
-  CONSTRAINT `chk_venues_timezone` CHECK (`timezone` = 'Asia/Ho_Chi_Minh')
+  CONSTRAINT `chk_facilities_slot` CHECK (`slot_minutes` IN (15, 30, 45, 60, 90, 120)),
+  CONSTRAINT `chk_facilities_duration` CHECK (
+    `min_booking_minutes` >= `slot_minutes`
+    AND `max_booking_minutes` >= `min_booking_minutes`
+    AND `max_booking_minutes` <= 1440
+    AND (`min_booking_minutes` MOD `slot_minutes`) = 0
+    AND (`max_booking_minutes` MOD `slot_minutes`) = 0
+  ),
+  CONSTRAINT `chk_facilities_cancel_window` CHECK (`cancel_before_minutes` <= 10080),
+  CONSTRAINT `chk_facilities_description` CHECK (`description` IS NULL OR TRIM(`description`) <> ''),
+  CONSTRAINT `chk_facilities_image_url` CHECK (`image_url` IS NULL OR CHAR_LENGTH(TRIM(`image_url`)) > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================================
 -- 3. BẢNG SPORTS, COURTS, COURT_DAY_LOCKS
+-- Thời lượng đặt lấy từ FACILITIES, không lấy từ môn thể thao.
 -- =====================================================================================
 CREATE TABLE `sports` (
   `sport_id` SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `sport_code` VARCHAR(30) NOT NULL,
   `name` VARCHAR(100) NOT NULL,
-  `default_slot_minutes` SMALLINT UNSIGNED NOT NULL DEFAULT 60,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`sport_id`),
   UNIQUE KEY `uq_sports_code` (`sport_code`),
-  CONSTRAINT `chk_sports_slot` CHECK (`default_slot_minutes` IN (30, 45, 60, 90, 120))
+  CONSTRAINT `chk_sports_name` CHECK (TRIM(`name`) <> ''),
+  CONSTRAINT `chk_sports_code` CHECK (TRIM(`sport_code`) <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `COURTS` (
   `court_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `facility_id` BIGINT UNSIGNED NOT NULL,
-  `sport_type` VARCHAR(30) NOT NULL,
+  `sport_id` SMALLINT UNSIGNED NOT NULL,
   `court_code` VARCHAR(40) NOT NULL,
   `court_name` VARCHAR(120) NOT NULL,
+  `description` VARCHAR(2000) NULL,
+  `image_url` VARCHAR(500) NULL,
   `price_per_hour` DECIMAL(12, 2) NOT NULL,
   `requires_approval` BOOLEAN NOT NULL DEFAULT FALSE,
   `status` ENUM('Available', 'Maintenance', 'Inactive') NOT NULL DEFAULT 'Available',
@@ -133,22 +174,26 @@ CREATE TABLE `COURTS` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `active_flag` TINYINT GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, 1, NULL)) VIRTUAL,
   PRIMARY KEY (`court_id`),
-  UNIQUE KEY `uq_courts_venue_code_active` (`facility_id`, `court_code`, `active_flag`),
-  UNIQUE KEY `uq_courts_venue_court` (`facility_id`, `court_id`),
-  KEY `idx_courts_lookup` (`facility_id`, `sport_type`, `status`, `deleted_at`),
-  CONSTRAINT `fk_courts_venue` FOREIGN KEY (`facility_id`) REFERENCES `FACILITIES` (`facility_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_courts_sport` FOREIGN KEY (`sport_type`) REFERENCES `sports` (`sport_code`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_courts_price` CHECK (`price_per_hour` >= 0)
+  UNIQUE KEY `uq_courts_facility_code_active` (`facility_id`, `court_code`, `active_flag`),
+  KEY `idx_courts_lookup` (`facility_id`, `sport_id`, `status`, `deleted_at`),
+  CONSTRAINT `fk_courts_facility` FOREIGN KEY (`facility_id`) REFERENCES `FACILITIES` (`facility_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_courts_sport` FOREIGN KEY (`sport_id`) REFERENCES `sports` (`sport_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_courts_price` CHECK (`price_per_hour` >= 0),
+  CONSTRAINT `chk_courts_name` CHECK (TRIM(`court_name`) <> ''),
+  CONSTRAINT `chk_courts_description` CHECK (`description` IS NULL OR TRIM(`description`) <> ''),
+  CONSTRAINT `chk_courts_image_url` CHECK (`image_url` IS NULL OR CHAR_LENGTH(TRIM(`image_url`)) > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- court_day_locks: mutex theo (sân, ngày lịch), lấy qua sp_lock_court_days; cố ý không có FK tới courts.
+-- court_day_locks: mutex theo (sân, ngày lịch), lấy qua sp_lock_court_days.
 CREATE TABLE `court_day_locks` (
   `court_id` BIGINT UNSIGNED NOT NULL,
   `booking_date` DATE NOT NULL COMMENT 'Ngày LỊCH (DATE của start_time / end_time), không phải ngày vận hành',
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`court_id`, `booking_date`)
+  PRIMARY KEY (`court_id`, `booking_date`),
+  CONSTRAINT `fk_court_day_locks_court` FOREIGN KEY (`court_id`) REFERENCES `COURTS` (`court_id`)
+    ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Bảng Mutex Lock hạt mịn theo (court_id, ngày lịch)';
+COMMENT='Mutex theo (court_id, ngày lịch)';
 
 -- =====================================================================================
 -- 4. BẢNG PRICING_RULES
@@ -184,12 +229,11 @@ CREATE TABLE `pricing_rules` (
 
 -- =====================================================================================
 -- 5. BẢNG BOOKING_SERIES
--- FK kép từ bookings: booking thuộc chuỗi thì facility_id và user_id phải trùng với chuỗi.
+-- Cụm sân suy ra từ court_id. Trigger đối chiếu sân, khách và thời lượng từng buổi.
 -- =====================================================================================
 CREATE TABLE `booking_series` (
   `series_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `facility_id` BIGINT UNSIGNED NOT NULL,
-  `court_id` BIGINT UNSIGNED NOT NULL COMMENT 'Sân cố định của chuỗi (phải thuộc cùng facility_id)',
+  `court_id` BIGINT UNSIGNED NOT NULL COMMENT 'Sân cố định của chuỗi',
   `user_id` BIGINT UNSIGNED NOT NULL,
   `recurrence_pattern` VARCHAR(100) NOT NULL COMMENT 'DAILY hoặc WEEKLY:MON,TUE,... (VD: WEEKLY:TUE,THU)',
   `slot_start_time` TIME NOT NULL COMMENT 'Giờ bắt đầu mỗi buổi (giờ VN)',
@@ -201,13 +245,10 @@ CREATE TABLE `booking_series` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`series_id`),
-  UNIQUE KEY `uq_series_venue_customer` (`series_id`, `facility_id`, `user_id`),
-  KEY `idx_series_venue_court` (`facility_id`, `court_id`),
+  KEY `idx_series_court` (`court_id`, `status`),
   KEY `idx_series_customer` (`user_id`, `status`),
-  KEY `idx_series_venue_dates` (`facility_id`, `status`, `series_start_date`, `series_end_date`),
-  CONSTRAINT `fk_series_venue` FOREIGN KEY (`facility_id`) REFERENCES `FACILITIES` (`facility_id`)
-    ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_series_court` FOREIGN KEY (`facility_id`, `court_id`) REFERENCES `COURTS` (`facility_id`, `court_id`)
+  KEY `idx_series_dates` (`status`, `series_start_date`, `series_end_date`),
+  CONSTRAINT `fk_series_court` FOREIGN KEY (`court_id`) REFERENCES `COURTS` (`court_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_series_customer` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
@@ -229,7 +270,6 @@ CREATE TABLE `BOOKINGS` (
   `booking_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `booking_code` VARCHAR(32) NOT NULL,
   `series_id` BIGINT UNSIGNED DEFAULT NULL COMMENT 'Liên kết chuỗi đặt sân cố định theo tháng',
-  `facility_id` BIGINT UNSIGNED NOT NULL,
   `court_id` BIGINT UNSIGNED NOT NULL,
   `user_id` BIGINT UNSIGNED NOT NULL,
   `checked_in_by` BIGINT UNSIGNED DEFAULT NULL,
@@ -249,10 +289,10 @@ CREATE TABLE `BOOKINGS` (
   `paid_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Tự đồng bộ từ payments',
   `refunded_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT 'Tự đồng bộ từ payments',
   `remaining_amount` DECIMAL(12, 2) GENERATED ALWAYS AS (
-    GREATEST((`court_rental_amount` + `addons_amount` - `discount_amount`) - (`paid_amount` - `refunded_amount`), 0.00)
+    GREATEST(`total_amount` - (`paid_amount` - `refunded_amount`), 0.00)
   ) STORED,
   `overpaid_amount` DECIMAL(12, 2) GENERATED ALWAYS AS (
-    GREATEST((`paid_amount` - `refunded_amount`) - (`court_rental_amount` + `addons_amount` - `discount_amount`), 0.00)
+    GREATEST((`paid_amount` - `refunded_amount`) - `total_amount`, 0.00)
   ) STORED,
   `status` ENUM('Pending', 'Deposit_Paid', 'Fully_Paid', 'Completed', 'Cancelled', 'Expired') NOT NULL DEFAULT 'Pending',
   `approval_status` ENUM('Pending', 'Confirmed', 'Rejected') NOT NULL DEFAULT 'Confirmed',
@@ -266,19 +306,17 @@ CREATE TABLE `BOOKINGS` (
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`booking_id`),
   UNIQUE KEY `uq_bookings_code` (`booking_code`),
-  UNIQUE KEY `uq_bookings_venue_booking` (`facility_id`, `booking_id`),
   KEY `idx_bookings_conflict_check` (`court_id`, `is_active_slot`, `start_time`, `end_time`, `status`, `hold_expires_at`),
-  KEY `idx_bookings_venue_schedule` (`facility_id`, `booking_date`, `is_active_slot`, `court_id`, `start_time`, `end_time`),
+  KEY `idx_bookings_court_date` (`court_id`, `booking_date`, `is_active_slot`, `start_time`),
   KEY `idx_bookings_pending_timeout` (`status`, `hold_expires_at`),
   KEY `idx_bookings_customer` (`user_id`, `start_time` DESC),
-  KEY `idx_bookings_series` (`series_id`, `facility_id`, `user_id`),
+  KEY `idx_bookings_series` (`series_id`),
   KEY `idx_bookings_checked_in_by` (`checked_in_by`),
-  CONSTRAINT `fk_bookings_venue_court`
-    FOREIGN KEY (`facility_id`, `court_id`) REFERENCES `COURTS` (`facility_id`, `court_id`)
+  CONSTRAINT `fk_bookings_court`
+    FOREIGN KEY (`court_id`) REFERENCES `COURTS` (`court_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_bookings_series`
-    FOREIGN KEY (`series_id`, `facility_id`, `user_id`)
-    REFERENCES `booking_series` (`series_id`, `facility_id`, `user_id`)
+    FOREIGN KEY (`series_id`) REFERENCES `booking_series` (`series_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_bookings_customer`
     FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`)
@@ -287,7 +325,7 @@ CREATE TABLE `BOOKINGS` (
     FOREIGN KEY (`checked_in_by`) REFERENCES `USERS` (`user_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_bookings_time_range` CHECK (
-    `end_time` > `start_time` AND TIMESTAMPDIFF(MINUTE, `start_time`, `end_time`) BETWEEN 30 AND 720
+    `end_time` > `start_time` AND TIMESTAMPDIFF(MINUTE, `start_time`, `end_time`) BETWEEN 15 AND 1440
   ),
   CONSTRAINT `chk_bookings_amounts` CHECK (
     `court_rental_amount` >= 0 AND `addons_amount` >= 0 AND `discount_amount` >= 0 AND
@@ -319,27 +357,26 @@ CREATE TABLE `services` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `active_flag` TINYINT GENERATED ALWAYS AS (IF(`deleted_at` IS NULL, 1, NULL)) VIRTUAL,
   PRIMARY KEY (`service_id`),
-  UNIQUE KEY `uq_services_venue_code_active` (`facility_id`, `service_code`, `active_flag`),
-  UNIQUE KEY `uq_services_venue_service` (`facility_id`, `service_id`),
-  CONSTRAINT `fk_services_venue` FOREIGN KEY (`facility_id`) REFERENCES `FACILITIES` (`facility_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  UNIQUE KEY `uq_services_facility_code_active` (`facility_id`, `service_code`, `active_flag`),
+  CONSTRAINT `fk_services_facility` FOREIGN KEY (`facility_id`) REFERENCES `FACILITIES` (`facility_id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_services_price` CHECK (`unit_price` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `booking_addons` (
   `addon_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `facility_id` BIGINT UNSIGNED NOT NULL,
   `booking_id` BIGINT UNSIGNED NOT NULL,
   `service_id` BIGINT UNSIGNED NOT NULL,
   `quantity` INT UNSIGNED NOT NULL DEFAULT 1,
-  `unit_price` DECIMAL(12, 2) NOT NULL COMMENT 'Snapshot giá lúc thêm; phải bằng services.unit_price (trigger kiểm tra)',
+  `unit_price` DECIMAL(12, 2) NOT NULL COMMENT 'Snapshot giá lúc thêm; phải bằng services.unit_price và cùng cụm sân với đơn (trigger kiểm tra)',
   `line_total` DECIMAL(12, 2) GENERATED ALWAYS AS (`quantity` * `unit_price`) STORED,
   PRIMARY KEY (`addon_id`),
   UNIQUE KEY `uq_booking_service` (`booking_id`, `service_id`),
-  CONSTRAINT `fk_addons_venue_booking`
-    FOREIGN KEY (`facility_id`, `booking_id`) REFERENCES `BOOKINGS` (`facility_id`, `booking_id`)
+  KEY `idx_addons_service` (`service_id`),
+  CONSTRAINT `fk_addons_booking`
+    FOREIGN KEY (`booking_id`) REFERENCES `BOOKINGS` (`booking_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_addons_venue_service`
-    FOREIGN KEY (`facility_id`, `service_id`) REFERENCES `services` (`facility_id`, `service_id`)
+  CONSTRAINT `fk_addons_service`
+    FOREIGN KEY (`service_id`) REFERENCES `services` (`service_id`)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_addons_qty_price` CHECK (`quantity` > 0 AND `unit_price` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -428,8 +465,12 @@ DROP TRIGGER IF EXISTS `trg_users_before_insert_normalize`$$
 DROP TRIGGER IF EXISTS `trg_users_before_update_normalize`$$
 DROP TRIGGER IF EXISTS `trg_venues_before_insert_guard`$$
 DROP TRIGGER IF EXISTS `trg_venues_before_update_guard`$$
+DROP TRIGGER IF EXISTS `trg_facilities_before_insert_guard`$$
+DROP TRIGGER IF EXISTS `trg_facilities_before_update_guard`$$
 DROP TRIGGER IF EXISTS `trg_pricing_before_insert_guard`$$
 DROP TRIGGER IF EXISTS `trg_pricing_before_update_guard`$$
+DROP TRIGGER IF EXISTS `trg_series_before_insert_guard`$$
+DROP TRIGGER IF EXISTS `trg_series_before_update_guard`$$
 DROP PROCEDURE IF EXISTS `sp_lock_court_days`$$
 DROP PROCEDURE IF EXISTS `sp_calc_booking_date`$$
 DROP PROCEDURE IF EXISTS `sp_calc_booking_payments`$$
@@ -437,6 +478,9 @@ DROP PROCEDURE IF EXISTS `sp_sync_booking_payments`$$
 DROP PROCEDURE IF EXISTS `sp_sync_booking_addons`$$
 DROP PROCEDURE IF EXISTS `sp_write_audit`$$
 DROP PROCEDURE IF EXISTS `sp_check_operating_hours`$$
+DROP PROCEDURE IF EXISTS `sp_check_booking_duration`$$
+DROP PROCEDURE IF EXISTS `sp_check_series_slot`$$
+DROP PROCEDURE IF EXISTS `sp_check_cancel_window`$$
 DROP PROCEDURE IF EXISTS `sp_check_booking_people`$$
 DROP PROCEDURE IF EXISTS `sp_check_booking_series`$$
 DROP PROCEDURE IF EXISTS `sp_assert_facility_owner`$$
@@ -451,7 +495,7 @@ BEGIN
 END$$
 
 CREATE PROCEDURE `sp_check_operating_hours`(
-  IN p_facility_id BIGINT UNSIGNED,
+  IN p_court_id BIGINT UNSIGNED,
   IN p_booking_date DATE,
   IN p_start_time DATETIME,
   IN p_end_time DATETIME
@@ -464,19 +508,20 @@ BEGIN
   DECLARE v_open_at DATETIME;
   DECLARE v_close_at DATETIME;
 
-  SELECT MAX(`open_time`), MAX(`close_time`), MAX(`is_overnight`), MAX(`is_active`)
+  SELECT MAX(f.`open_time`), MAX(f.`close_time`), MAX(f.`is_overnight`), MAX(f.`is_active`)
     INTO v_open_time, v_close_time, v_is_overnight, v_is_active
-  FROM `FACILITIES`
-  WHERE `facility_id` = p_facility_id AND `deleted_at` IS NULL;
+  FROM `COURTS` c
+  JOIN `FACILITIES` f ON f.`facility_id` = c.`facility_id`
+  WHERE c.`court_id` = p_court_id AND f.`deleted_at` IS NULL;
 
   IF v_open_time IS NULL THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'VENUE_UNAVAILABLE: Cụm sân không tồn tại hoặc đã bị xóa.';
+      SET MESSAGE_TEXT = 'FACILITY_UNAVAILABLE: Sân hoặc cụm sân không tồn tại, hoặc cụm sân đã bị xóa.';
   END IF;
 
   IF v_is_active = 0 THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'VENUE_UNAVAILABLE: Cụm sân đang ngưng hoạt động.';
+      SET MESSAGE_TEXT = 'FACILITY_UNAVAILABLE: Cụm sân đang ngưng hoạt động.';
   END IF;
 
   SET v_open_at = TIMESTAMP(p_booking_date, v_open_time);
@@ -511,19 +556,19 @@ BEGIN
   IF p_checked_in_by IS NOT NULL THEN
     SELECT COUNT(*) INTO v_ok
     FROM `USERS`
-    WHERE `user_id` = p_checked_in_by AND `role` IN ('ADMIN', 'Staff')
+    WHERE `user_id` = p_checked_in_by AND `role` IN ('ADMIN', 'STAFF')
       AND `status` = 'Active' AND `deleted_at` IS NULL;
 
     IF v_ok = 0 THEN
       SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'CHECKIN_STAFF_INVALID: Người check-in phải là Admin/Staff đang hoạt động.';
+        SET MESSAGE_TEXT = 'CHECKIN_STAFF_INVALID: Người check-in phải là ADMIN hoặc STAFF đang hoạt động.';
     END IF;
   END IF;
 END$$
 
 CREATE PROCEDURE `sp_check_booking_series`(
   IN p_series_id BIGINT UNSIGNED,
-  IN p_facility_id BIGINT UNSIGNED,
+  IN p_court_id BIGINT UNSIGNED,
   IN p_user_id BIGINT UNSIGNED,
   IN p_booking_date DATE
 )
@@ -534,16 +579,102 @@ BEGIN
     SELECT COUNT(*) INTO v_ok
     FROM `booking_series`
     WHERE `series_id` = p_series_id
-      AND `facility_id` = p_facility_id
+      AND `court_id` = p_court_id
       AND `user_id` = p_user_id
       AND `status` = 'Active'
       AND p_booking_date BETWEEN `series_start_date` AND `series_end_date`;
 
     IF v_ok = 0 THEN
       SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'SERIES_INVALID: Chuỗi đặt sân không còn Active hoặc ngày vận hành nằm ngoài khoảng của chuỗi.';
+        SET MESSAGE_TEXT = 'SERIES_INVALID: Chuỗi không còn Active, không đúng sân/khách, hoặc ngày vận hành nằm ngoài khoảng của chuỗi.';
     END IF;
   END IF;
+END$$
+
+CREATE PROCEDURE `sp_check_booking_duration`(
+  IN p_court_id BIGINT UNSIGNED,
+  IN p_start_time DATETIME,
+  IN p_end_time DATETIME
+)
+BEGIN
+  DECLARE v_slot SMALLINT UNSIGNED;
+  DECLARE v_min SMALLINT UNSIGNED;
+  DECLARE v_max SMALLINT UNSIGNED;
+  DECLARE v_minutes INT;
+
+  SELECT MAX(f.`slot_minutes`), MAX(f.`min_booking_minutes`), MAX(f.`max_booking_minutes`)
+    INTO v_slot, v_min, v_max
+  FROM `COURTS` c
+  JOIN `FACILITIES` f ON f.`facility_id` = c.`facility_id`
+  WHERE c.`court_id` = p_court_id AND f.`deleted_at` IS NULL;
+
+  IF v_slot IS NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'FACILITY_UNAVAILABLE: Sân hoặc cụm sân không tồn tại, hoặc cụm sân đã bị xóa.';
+  END IF;
+
+  SET v_minutes = TIMESTAMPDIFF(MINUTE, p_start_time, p_end_time);
+  IF v_minutes < v_min OR v_minutes > v_max OR (v_minutes MOD v_slot) <> 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'BOOKING_DURATION_INVALID: Thời lượng không khớp bước, mức tối thiểu hoặc tối đa do chủ sân cấu hình.';
+  END IF;
+END$$
+
+CREATE PROCEDURE `sp_check_cancel_window`(
+  IN p_court_id BIGINT UNSIGNED,
+  IN p_start_time DATETIME
+)
+BEGIN
+  DECLARE v_before SMALLINT UNSIGNED;
+  DECLARE v_owner BIGINT UNSIGNED;
+  DECLARE v_privileged INT DEFAULT 0;
+
+  SELECT MAX(f.`cancel_before_minutes`), MAX(f.`owner_id`)
+    INTO v_before, v_owner
+  FROM `COURTS` c
+  JOIN `FACILITIES` f ON f.`facility_id` = c.`facility_id`
+  WHERE c.`court_id` = p_court_id AND f.`deleted_at` IS NULL;
+
+  IF v_before IS NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'FACILITY_UNAVAILABLE: Sân hoặc cụm sân không tồn tại, hoặc cụm sân đã bị xóa.';
+  END IF;
+
+  SELECT COUNT(*) INTO v_privileged
+  FROM `USERS` u
+  WHERE u.`user_id` = CAST(@app_user_id AS UNSIGNED)
+    AND u.`status` = 'Active'
+    AND u.`deleted_at` IS NULL
+    AND (
+      u.`role` IN ('ADMIN', 'STAFF')
+      OR (u.`role` = 'OWNER' AND u.`user_id` = v_owner)
+    );
+
+  IF v_privileged = 0
+     AND fn_now_vn() > DATE_SUB(p_start_time, INTERVAL v_before MINUTE) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'CANCEL_WINDOW_CLOSED: Đã quá hạn hủy đơn do chủ sân quy định.';
+  END IF;
+END$$
+
+CREATE PROCEDURE `sp_check_series_slot`(
+  IN p_court_id BIGINT UNSIGNED,
+  IN p_on_date DATE,
+  IN p_slot_start TIME,
+  IN p_slot_end TIME
+)
+BEGIN
+  DECLARE v_start DATETIME;
+  DECLARE v_end DATETIME;
+
+  SET v_start = TIMESTAMP(p_on_date, p_slot_start);
+  IF p_slot_end <= p_slot_start THEN
+    SET v_end = TIMESTAMP(DATE_ADD(p_on_date, INTERVAL 1 DAY), p_slot_end);
+  ELSE
+    SET v_end = TIMESTAMP(p_on_date, p_slot_end);
+  END IF;
+
+  CALL `sp_check_booking_duration`(p_court_id, v_start, v_end);
 END$$
 
 CREATE PROCEDURE `sp_assert_facility_owner`(IN p_user_id BIGINT UNSIGNED)
@@ -613,7 +744,7 @@ BEGIN
   END IF;
 END$$
 
--- 9.0.1. Trigger USERS (chuẩn hóa SĐT), VENUES (kiểm tra manager), PRICING_RULES (chặn rule mơ hồ)
+-- 9.0.1. Trigger USERS (chuẩn hóa SĐT), FACILITIES (kiểm tra chủ sân), PRICING_RULES, BOOKING_SERIES
 CREATE TRIGGER `trg_users_before_insert_normalize`
 BEFORE INSERT ON `USERS`
 FOR EACH ROW
@@ -636,14 +767,14 @@ BEGIN
   END IF;
 END$$
 
-CREATE TRIGGER `trg_venues_before_insert_guard`
+CREATE TRIGGER `trg_facilities_before_insert_guard`
 BEFORE INSERT ON `FACILITIES`
 FOR EACH ROW
 BEGIN
   CALL `sp_assert_facility_owner`(NEW.`owner_id`);
 END$$
 
-CREATE TRIGGER `trg_venues_before_update_guard`
+CREATE TRIGGER `trg_facilities_before_update_guard`
 BEFORE UPDATE ON `FACILITIES`
 FOR EACH ROW
 BEGIN
@@ -672,6 +803,28 @@ BEGIN
   );
 END$$
 
+CREATE TRIGGER `trg_series_before_insert_guard`
+BEFORE INSERT ON `booking_series`
+FOR EACH ROW
+BEGIN
+  CALL `sp_check_series_slot`(
+    NEW.`court_id`, NEW.`series_start_date`, NEW.`slot_start_time`, NEW.`slot_end_time`
+  );
+END$$
+
+CREATE TRIGGER `trg_series_before_update_guard`
+BEFORE UPDATE ON `booking_series`
+FOR EACH ROW
+BEGIN
+  IF NEW.`court_id` <> OLD.`court_id`
+     OR NEW.`slot_start_time` <> OLD.`slot_start_time`
+     OR NEW.`slot_end_time` <> OLD.`slot_end_time` THEN
+    CALL `sp_check_series_slot`(
+      NEW.`court_id`, NEW.`series_start_date`, NEW.`slot_start_time`, NEW.`slot_end_time`
+    );
+  END IF;
+END$$
+
 -- 9.0.2. Khóa (sân, ngày lịch), tính ngày vận hành, đồng bộ tiền/dịch vụ, ghi audit
 --   sp_lock_court_days luôn khóa ngày nhỏ trước (thứ tự cố định) để tránh deadlock.
 CREATE PROCEDURE `sp_lock_court_days`(
@@ -698,7 +851,7 @@ BEGIN
 END$$
 
 CREATE PROCEDURE `sp_calc_booking_date`(
-  IN p_facility_id BIGINT UNSIGNED,
+  IN p_court_id BIGINT UNSIGNED,
   IN p_start_time DATETIME,
   OUT p_booking_date DATE
 )
@@ -706,10 +859,11 @@ BEGIN
   DECLARE v_open_time TIME;
   DECLARE v_is_overnight TINYINT;
 
-  SELECT MAX(`open_time`), MAX(`is_overnight`)
+  SELECT MAX(f.`open_time`), MAX(f.`is_overnight`)
     INTO v_open_time, v_is_overnight
-  FROM `FACILITIES`
-  WHERE `facility_id` = p_facility_id;
+  FROM `COURTS` c
+  JOIN `FACILITIES` f ON f.`facility_id` = c.`facility_id`
+  WHERE c.`court_id` = p_court_id;
 
   IF v_is_overnight = 1 AND TIME(p_start_time) < v_open_time THEN
     SET p_booking_date = DATE_SUB(DATE(p_start_time), INTERVAL 1 DAY);
@@ -831,12 +985,13 @@ BEGIN
     SET NEW.`hold_expires_at` = NULL;
   END IF;
 
-  CALL `sp_calc_booking_date`(NEW.`facility_id`, NEW.`start_time`, v_booking_date);
+  CALL `sp_calc_booking_date`(NEW.`court_id`, NEW.`start_time`, v_booking_date);
   SET NEW.`booking_date` = v_booking_date;
 
-  CALL `sp_check_operating_hours`(NEW.`facility_id`, v_booking_date, NEW.`start_time`, NEW.`end_time`);
+  CALL `sp_check_operating_hours`(NEW.`court_id`, v_booking_date, NEW.`start_time`, NEW.`end_time`);
+  CALL `sp_check_booking_duration`(NEW.`court_id`, NEW.`start_time`, NEW.`end_time`);
   CALL `sp_check_booking_people`(NEW.`user_id`, NEW.`checked_in_by`);
-  CALL `sp_check_booking_series`(NEW.`series_id`, NEW.`facility_id`, NEW.`user_id`, v_booking_date);
+  CALL `sp_check_booking_series`(NEW.`series_id`, NEW.`court_id`, NEW.`user_id`, v_booking_date);
 
   CALL `sp_lock_court_days`(NEW.`court_id`, NEW.`start_time`, NEW.`end_time`);
 
@@ -889,6 +1044,7 @@ BEGIN
   DECLARE v_addons DECIMAL(12, 2);
   DECLARE v_requires_approval BOOLEAN DEFAULT FALSE;
   DECLARE v_manager_count INT DEFAULT 0;
+  DECLARE v_addon_mismatch INT DEFAULT 0;
 
   -- Đổi lịch hoặc khôi phục đơn chưa thanh toán phải xét lại yêu cầu duyệt.
   IF OLD.`status` IN ('Pending', 'Cancelled', 'Expired')
@@ -901,8 +1057,10 @@ BEGIN
     SET NEW.`approval_status` = IF(v_requires_approval, 'Pending', 'Confirmed');
   ELSEIF NEW.`approval_status` <> OLD.`approval_status` THEN
     SELECT COUNT(*) INTO v_manager_count
-    FROM `FACILITIES` v JOIN `USERS` u ON u.`user_id` = v.`owner_id`
-    WHERE v.`facility_id` = OLD.`facility_id` AND u.`user_id` = @app_user_id
+    FROM `COURTS` c
+    JOIN `FACILITIES` v ON v.`facility_id` = c.`facility_id`
+    JOIN `USERS` u ON u.`user_id` = v.`owner_id`
+    WHERE c.`court_id` = OLD.`court_id` AND u.`user_id` = @app_user_id
       AND u.`role` = 'OWNER' AND u.`status` = 'Active' AND u.`deleted_at` IS NULL;
 
     IF v_manager_count = 0 OR OLD.`approval_status` <> 'Pending' OR OLD.`status` <> 'Pending'
@@ -919,9 +1077,23 @@ BEGIN
       SET MESSAGE_TEXT = 'APPROVAL_REQUIRED: Đơn phải được xác nhận trước khi chuyển trạng thái thanh toán.';
   END IF;
 
-  IF NEW.`facility_id` <> OLD.`facility_id` OR NEW.`booking_code` <> OLD.`booking_code` THEN
+  IF NEW.`booking_code` <> OLD.`booking_code` THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'IMMUTABLE_FIELD: Không được đổi facility_id hoặc booking_code của đơn đã tạo.';
+      SET MESSAGE_TEXT = 'IMMUTABLE_FIELD: Không được đổi booking_code của đơn đã tạo.';
+  END IF;
+
+  IF NEW.`court_id` <> OLD.`court_id` THEN
+    SELECT COUNT(*) INTO v_addon_mismatch
+    FROM `booking_addons` a
+    JOIN `services` s ON s.`service_id` = a.`service_id`
+    JOIN `COURTS` c ON c.`court_id` = NEW.`court_id`
+    WHERE a.`booking_id` = NEW.`booking_id`
+      AND s.`facility_id` <> c.`facility_id`;
+
+    IF v_addon_mismatch > 0 THEN
+      SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'ADDON_FACILITY_MISMATCH: Không chuyển đơn sang sân của cụm khác khi còn dịch vụ của cụm cũ.';
+    END IF;
   END IF;
 
   IF OLD.`status` = 'Completed' THEN
@@ -957,6 +1129,10 @@ BEGIN
     IF NEW.`status` = 'Expired' AND OLD.`hold_expires_at` > fn_now_vn() THEN
       SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'EXPIRE_TOO_EARLY: Đơn Pending chưa quá hold_expires_at nên chưa thể chuyển sang Expired.';
+    END IF;
+
+    IF NEW.`status` = 'Cancelled' THEN
+      CALL `sp_check_cancel_window`(NEW.`court_id`, NEW.`start_time`);
     END IF;
   END IF;
 
@@ -1020,8 +1196,9 @@ BEGIN
     SET NEW.`hold_expires_at` = NULL;
   END IF;
 
-  IF NEW.`start_time` <> OLD.`start_time` OR NEW.`booking_date` <> OLD.`booking_date` THEN
-    CALL `sp_calc_booking_date`(NEW.`facility_id`, NEW.`start_time`, v_booking_date);
+  IF NEW.`start_time` <> OLD.`start_time` OR NEW.`court_id` <> OLD.`court_id`
+     OR NEW.`booking_date` <> OLD.`booking_date` THEN
+    CALL `sp_calc_booking_date`(NEW.`court_id`, NEW.`start_time`, v_booking_date);
     SET NEW.`booking_date` = v_booking_date;
   END IF;
 
@@ -1032,15 +1209,19 @@ BEGIN
     OR OLD.`status` IN ('Cancelled', 'Expired')
     OR (OLD.`approval_status` = 'Pending' AND NEW.`approval_status` = 'Confirmed')
   ) THEN
-    CALL `sp_check_operating_hours`(NEW.`facility_id`, NEW.`booking_date`, NEW.`start_time`, NEW.`end_time`);
+    CALL `sp_check_operating_hours`(NEW.`court_id`, NEW.`booking_date`, NEW.`start_time`, NEW.`end_time`);
+    CALL `sp_check_booking_duration`(NEW.`court_id`, NEW.`start_time`, NEW.`end_time`);
   END IF;
 
   IF NOT (NEW.`user_id` <=> OLD.`user_id` AND NEW.`checked_in_by` <=> OLD.`checked_in_by`) THEN
     CALL `sp_check_booking_people`(NEW.`user_id`, NEW.`checked_in_by`);
   END IF;
 
-  IF NOT (NEW.`series_id` <=> OLD.`series_id`) OR NEW.`start_time` <> OLD.`start_time` THEN
-    CALL `sp_check_booking_series`(NEW.`series_id`, NEW.`facility_id`, NEW.`user_id`, NEW.`booking_date`);
+  IF NOT (NEW.`series_id` <=> OLD.`series_id`)
+     OR NEW.`start_time` <> OLD.`start_time`
+     OR NEW.`court_id` <> OLD.`court_id`
+     OR NEW.`user_id` <> OLD.`user_id` THEN
+    CALL `sp_check_booking_series`(NEW.`series_id`, NEW.`court_id`, NEW.`user_id`, NEW.`booking_date`);
   END IF;
 
   IF NEW.`status` IN ('Pending', 'Deposit_Paid', 'Fully_Paid', 'Completed') AND (
@@ -1340,14 +1521,16 @@ BEGIN
       SET MESSAGE_TEXT = 'ADDON_NOT_ALLOWED: Chỉ được thêm dịch vụ cho đơn Pending, Deposit_Paid hoặc Fully_Paid.';
   END IF;
 
-  SELECT MAX(`unit_price`) INTO v_price
-  FROM `services`
-  WHERE `facility_id` = NEW.`facility_id` AND `service_id` = NEW.`service_id`
-    AND `is_active` = 1 AND `deleted_at` IS NULL;
+  SELECT MAX(s.`unit_price`) INTO v_price
+  FROM `services` s
+  JOIN `COURTS` c ON c.`facility_id` = s.`facility_id`
+  JOIN `BOOKINGS` b ON b.`court_id` = c.`court_id` AND b.`booking_id` = NEW.`booking_id`
+  WHERE s.`service_id` = NEW.`service_id`
+    AND s.`is_active` = 1 AND s.`deleted_at` IS NULL;
 
   IF v_price IS NULL OR NEW.`unit_price` <> v_price THEN
     SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'ADDON_PRICE_MISMATCH: Dịch vụ không còn bán, hoặc unit_price khác đơn giá hiện hành.';
+      SET MESSAGE_TEXT = 'ADDON_PRICE_MISMATCH: Dịch vụ không cùng cụm sân với đơn, không còn bán, hoặc unit_price khác đơn giá hiện hành.';
   END IF;
 END$$
 
@@ -1371,7 +1554,6 @@ BEGIN
   DECLARE v_booking_ok INT DEFAULT 0;
 
   IF NEW.`booking_id` <> OLD.`booking_id`
-     OR NEW.`facility_id` <> OLD.`facility_id`
      OR NEW.`service_id` <> OLD.`service_id`
      OR NEW.`unit_price` <> OLD.`unit_price` THEN
     SIGNAL SQLSTATE '45000'
