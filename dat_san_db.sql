@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS booking_status_history;
 DROP TABLE IF EXISTS BOOKINGS;
 DROP TABLE IF EXISTS court_maintenance_periods;
+DROP TABLE IF EXISTS court_images;
 DROP TABLE IF EXISTS COURTS;
 DROP TABLE IF EXISTS facility_operating_hours;
 DROP TABLE IF EXISTS SPORTS;
@@ -129,7 +130,7 @@ CREATE TABLE SPORTS (
 INSERT INTO SPORTS(sport_name) VALUES
   ('Cầu lông'),('Bóng đá'),('Bóng rổ'),('Tennis'),('Bóng chuyền'),('Bóng bàn');
 
--- 3. San con, hien thi chi tiet va gia co dinh theo gio
+-- 3. San con, anh san va gia co dinh theo gio
 CREATE TABLE COURTS (
   court_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   facility_id BIGINT UNSIGNED NOT NULL,
@@ -160,6 +161,23 @@ CREATE TABLE COURTS (
     AND max_booking_minutes <= 720
   ),
   CONSTRAINT chk_court_name CHECK (TRIM(court_name) <> '')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Anh thu vien cua san: COURTS.cover_image_url la anh dai dien,
+-- court_images luu cac anh bo sung cho gallery tren trang chi tiet.
+-- Chi luu URL/duong dan file (local storage, object storage hoac CDN), khong luu binary trong DB.
+CREATE TABLE court_images (
+  image_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  court_id BIGINT UNSIGNED NOT NULL,
+  image_url VARCHAR(500) NOT NULL,
+  alt_text VARCHAR(255) DEFAULT NULL,
+  sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (image_id),
+  KEY idx_court_images_gallery (court_id,sort_order,image_id),
+  CONSTRAINT fk_court_images_court FOREIGN KEY (court_id)
+    REFERENCES COURTS(court_id) ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT chk_court_images_url CHECK (TRIM(image_url) <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Lich bao tri theo khoang thoi gian; khong phai tat ca ngay deu dong cua.
@@ -760,18 +778,20 @@ DELIMITER ;
 
 -- Ghi chu tich hop:
 -- 1. Tim san: loc COURTS + SPORTS + FACILITIES theo mon, quan/huyen, gia va trang thai.
--- 2. Lich trong: loai booking Pending/Confirmed va maintenance periods co khoang giao nhau.
--- 3. Chi hien san neu facility is_active=1, court status='Available', sport is_active=1.
--- 4. Moi facility can du 7 dong facility_operating_hours truoc khi mo dat san.
--- 5. Tao booking bang sp_create_booking; khong tu INSERT BOOKINGS tu frontend.
--- 6. Pending chiem slot de tranh hai khach cung yeu cau mot khoang gio.
--- 7. Xac nhan/tu choi bang sp_process_booking; huy bang sp_cancel_booking.
--- 8. UC07 dung sp_add_court_maintenance hoac sp_set_court_status.
--- 9. UC09 dung sp_review_owner_account. Tai khoan OWNER chi hop le sau khi Approved.
--- 10. Cac CRUD con lai phai kiem tra role va owner_id tai backend.
--- 11. Khi sua gio hoat dong, backend khoa dong FACILITIES tuong ung (FOR UPDATE),
+-- 2. Anh san: cover_image_url la anh dai dien; court_images la gallery, sap xep theo sort_order.
+-- 3. Lich trong: loai booking Pending/Confirmed va maintenance periods co khoang giao nhau.
+-- 4. Chi hien san neu facility is_active=1, court status='Available', sport is_active=1.
+-- 5. Moi facility can du 7 dong facility_operating_hours truoc khi mo dat san.
+-- 6. Tao booking bang sp_create_booking; khong tu INSERT BOOKINGS tu frontend.
+-- 7. Pending chiem slot de tranh hai khach cung yeu cau mot khoang gio.
+-- 8. Xac nhan/tu choi bang sp_process_booking; huy bang sp_cancel_booking.
+-- 9. UC07 dung sp_add_court_maintenance hoac sp_set_court_status.
+-- 10. UC09 dung sp_review_owner_account. Tai khoan OWNER chi hop le sau khi Approved.
+-- 11. Quan ly gallery qua court_images; backend phai kiem tra quyen so huu san.
+-- 12. Cac CRUD con lai phai kiem tra role va owner_id tai backend.
+-- 13. Khi sua gio hoat dong, backend khoa dong FACILITIES tuong ung (FOR UPDATE),
 --     kiem tra khong lam vo booking Pending/Confirmed, roi moi cap nhat lich.
--- 12. Khi sua gia/san thai cua COURTS, cap nhat trong transaction; row lock tren COURTS
+-- 14. Khi sua gia/trang thai cua COURTS, cap nhat trong transaction; row lock tren COURTS
 --     se dong bo voi sp_create_booking/sp_add_court_maintenance/sp_set_court_status.
 --
 -- Co y khong dua vao phien ban nay: thanh toan/hoan tien, khuyen mai, dich vu phu,
