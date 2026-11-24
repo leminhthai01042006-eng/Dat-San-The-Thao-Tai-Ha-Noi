@@ -4,6 +4,7 @@ const db = require("../../config/db");
 const { findAvailableCourts } = require("./courts.repository");
 const { getDirectoryAvailability } = require("./directory-availability");
 const requireAuth = require("../../middleware/requireAuth");
+const { isValidImageUrl } = require("../image-url");
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ router.get("/:facilityId/courts", async (request, response) => {
     const [courts] = await db.execute(
       `
       SELECT c.court_id, c.court_name, c.sport_type,
-             c.price_per_hour, c.status, c.requires_approval
+             c.price_per_hour, c.status, c.requires_approval, c.image_url
       FROM COURTS AS c
       JOIN FACILITIES AS f ON f.facility_id = c.facility_id
       WHERE c.facility_id = ?
@@ -67,7 +68,8 @@ router.get(
     try {
       const [courts] = await db.execute(
         `
-      SELECT c.court_id, c.status, f.open_time, f.close_time, f.is_overnight
+      SELECT c.court_id, c.status, f.open_time, f.close_time, f.is_overnight,
+             c.image_url, f.cancel_before_minutes
       FROM COURTS AS c
       JOIN FACILITIES AS f ON f.facility_id = c.facility_id
       WHERE c.facility_id = ? AND c.court_id = ?
@@ -174,6 +176,7 @@ router.post("/:facilityId/courts", requireAuth, async (request, response) => {
     sport_type,
     price_per_hour,
     requires_approval = false,
+    image_url,
   } = request.body ?? {};
 
   if (!/^[1-9][0-9]*$/.test(facilityId)) {
@@ -205,6 +208,10 @@ router.post("/:facilityId/courts", requireAuth, async (request, response) => {
     });
   }
 
+  if (!isValidImageUrl(image_url)) {
+    return response.status(400).json({ error: "Nhập URL ảnh HTTP(S) tối đa 500 ký tự." });
+  }
+
   const courtCode = randomUUID();
 
   try {
@@ -212,9 +219,9 @@ router.post("/:facilityId/courts", requireAuth, async (request, response) => {
       `
       INSERT INTO COURTS (
         facility_id, sport_type, court_code, court_name,
-        price_per_hour, requires_approval
+        price_per_hour, requires_approval, image_url
       )
-      SELECT facility_id, ?, ?, ?, ?, ?
+      SELECT facility_id, ?, ?, ?, ?, ?, ?
       FROM FACILITIES
       WHERE facility_id = ? AND owner_id = ? AND deleted_at IS NULL
     `,
@@ -224,6 +231,7 @@ router.post("/:facilityId/courts", requireAuth, async (request, response) => {
         name,
         price_per_hour,
         requires_approval,
+        image_url?.trim() ?? null,
         facilityId,
         request.user.user_id,
       ],
@@ -264,7 +272,7 @@ router.put(
     }
 
     const { facilityId, courtId } = request.params;
-    const { court_name, price_per_hour, requires_approval } =
+    const { court_name, price_per_hour, requires_approval, image_url } =
       request.body ?? {};
     const positiveId = /^[1-9][0-9]*$/;
 
@@ -299,12 +307,17 @@ router.put(
       });
     }
 
+    if (!isValidImageUrl(image_url)) {
+      return response.status(400).json({ error: "Nhập URL ảnh HTTP(S) tối đa 500 ký tự." });
+    }
+
     try {
       const [result] = await db.execute(
         `
       UPDATE COURTS AS c
       JOIN FACILITIES AS f ON f.facility_id = c.facility_id
-      SET c.court_name = ?, c.price_per_hour = ?, c.requires_approval = ?
+      SET c.court_name = ?, c.price_per_hour = ?, c.requires_approval = ?,
+          c.image_url = IF(?, ?, c.image_url)
       WHERE c.facility_id = ?
         AND c.court_id = ?
         AND f.owner_id = ?
@@ -315,6 +328,8 @@ router.put(
           name,
           price_per_hour,
           requires_approval,
+          image_url !== undefined,
+          image_url?.trim() ?? null,
           facilityId,
           courtId,
           request.user.user_id,

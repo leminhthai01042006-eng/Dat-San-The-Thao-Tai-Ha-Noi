@@ -2,13 +2,18 @@ const express = require("express");
 const db = require("../../config/db");
 const { randomBytes } = require("node:crypto");
 const requireAuth = require("../../middleware/requireAuth");
+const { isValidImageUrl } = require("../image-url");
 
 const router = express.Router();
+
+function isValidCancellationWindow(value) {
+  return value === undefined || (Number.isInteger(value) && value >= 0 && value <= 10080);
+}
 
 router.get("/", async (_request, response) => {
   try {
     const [facilities] = await db.query(`
-      SELECT facility_id, facility_name, address, district
+      SELECT facility_id, facility_name, address, district, image_url, cancel_before_minutes
       FROM FACILITIES
       WHERE is_active = 1 AND deleted_at IS NULL
       ORDER BY facility_name, facility_id
@@ -42,7 +47,7 @@ router.get("/mine", requireAuth, async (request, response) => {
   try {
     const [facilities] = await db.execute(
       `SELECT facility_id, facility_name, address, district, city, hotline,
-              open_time, close_time, is_overnight, is_active
+              open_time, close_time, is_overnight, is_active, image_url, cancel_before_minutes
        FROM FACILITIES
        WHERE owner_id = ? AND deleted_at IS NULL
        ORDER BY facility_name, facility_id`,
@@ -62,7 +67,7 @@ router.post("/", requireAuth, async (request, response) => {
     });
   }
 
-  const { facility_name, address, district, city, hotline } =
+  const { facility_name, address, district, city, hotline, image_url, cancel_before_minutes } =
     request.body ?? {};
 
   const fields = [
@@ -92,6 +97,12 @@ router.post("/", requireAuth, async (request, response) => {
     });
   }
 
+  if (!isValidImageUrl(image_url) || !isValidCancellationWindow(cancel_before_minutes)) {
+    return response.status(400).json({
+      error: "Nhập URL ảnh HTTP(S) tối đa 500 ký tự và hạn hủy từ 0 đến 10080 phút.",
+    });
+  }
+
   const venueCode = `FAC-${randomBytes(10).toString("hex")}`;
 
   try {
@@ -104,9 +115,11 @@ router.post("/", requireAuth, async (request, response) => {
         district,
         city,
         hotline,
-        owner_id
+        owner_id,
+        image_url,
+        cancel_before_minutes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, DEFAULT(cancel_before_minutes)))
     `,
       [
         venueCode,
@@ -116,6 +129,8 @@ router.post("/", requireAuth, async (request, response) => {
         city.trim(),
         hotline.trim(),
         request.user.user_id,
+        image_url?.trim() ?? null,
+        cancel_before_minutes ?? null,
       ],
     );
 
@@ -154,6 +169,8 @@ router.put("/:facilityId", requireAuth, async (request, response) => {
     hotline,
     open_time,
     close_time,
+    image_url,
+    cancel_before_minutes,
   } = request.body ?? {};
 
   const fields = [
@@ -196,6 +213,12 @@ router.put("/:facilityId", requireAuth, async (request, response) => {
     });
   }
 
+  if (!isValidImageUrl(image_url) || !isValidCancellationWindow(cancel_before_minutes)) {
+    return response.status(400).json({
+      error: "Nhập URL ảnh HTTP(S) tối đa 500 ký tự và hạn hủy từ 0 đến 10080 phút.",
+    });
+  }
+
   const isOvernight = close_time <= open_time;
 
   try {
@@ -203,7 +226,9 @@ router.put("/:facilityId", requireAuth, async (request, response) => {
       `
       UPDATE FACILITIES
       SET facility_name = ?, address = ?, district = ?, city = ?,
-          hotline = ?, open_time = ?, close_time = ?, is_overnight = ?
+          hotline = ?, open_time = ?, close_time = ?, is_overnight = ?,
+          image_url = IF(?, ?, image_url),
+          cancel_before_minutes = COALESCE(?, cancel_before_minutes)
       WHERE facility_id = ?
         AND owner_id = ?
         AND deleted_at IS NULL
@@ -217,6 +242,9 @@ router.put("/:facilityId", requireAuth, async (request, response) => {
         `${open_time}:00`,
         `${close_time}:00`,
         isOvernight,
+        image_url !== undefined,
+        image_url?.trim() ?? null,
+        cancel_before_minutes ?? null,
         facilityId,
         request.user.user_id,
       ],

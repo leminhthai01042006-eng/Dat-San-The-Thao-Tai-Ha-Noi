@@ -147,15 +147,16 @@ GRANT INSERT (full_name, email, phone, password_hash),
 ON sports_court_booking.USERS
 TO 'courtpulse_app'@'localhost';
 
-GRANT INSERT (venue_code, facility_name, address, district, city, hotline, owner_id),
+GRANT INSERT (venue_code, facility_name, address, district, city, hotline, owner_id,
+              image_url, cancel_before_minutes),
       UPDATE (facility_name, address, district, city, hotline,
-              open_time, close_time, is_overnight)
+              open_time, close_time, is_overnight, image_url, cancel_before_minutes)
 ON sports_court_booking.FACILITIES
 TO 'courtpulse_app'@'localhost';
 
 GRANT INSERT (facility_id, sport_type, court_code, court_name,
-              price_per_hour, requires_approval),
-      UPDATE (court_name, price_per_hour, requires_approval, status)
+              price_per_hour, requires_approval, image_url),
+      UPDATE (court_name, price_per_hour, requires_approval, status, image_url)
 ON sports_court_booking.COURTS
 TO 'courtpulse_app'@'localhost';
 
@@ -175,6 +176,33 @@ TO 'courtpulse_app'@'localhost';
 Quyền ghi được giới hạn theo các cột mà API sử dụng. Backend gọi
 `sp_lock_court_days` khi chủ sân xác nhận đơn và gọi `fn_now_vn`
 khi cập nhật các đơn quá hạn giữ chỗ.
+
+### Nâng cấp database hiện có
+
+Với database `sports_court_booking` đã cài từ `csdl.sql`, dùng tài khoản quản trị MySQL để chạy migration dưới đây từ thư mục gốc của repo.
+
+```sql
+SOURCE backend/migrations/001_cancellation_and_court_images.sql;
+```
+
+Nếu tài khoản backend đã được cấp quyền theo cột, cấp thêm quyền ghi cho các cột mới.
+Thay `'courtpulse_app'@'localhost'` bằng tài khoản ứng dụng thực tế nếu dùng tên khác.
+
+```sql
+GRANT INSERT (image_url, cancel_before_minutes), UPDATE (image_url, cancel_before_minutes)
+ON sports_court_booking.FACILITIES TO 'courtpulse_app'@'localhost';
+
+GRANT INSERT (image_url), UPDATE (image_url)
+ON sports_court_booking.COURTS TO 'courtpulse_app'@'localhost';
+```
+
+### Hạn hủy và ảnh sân
+
+- Chủ sân gửi `cancel_before_minutes` qua API tạo hoặc sửa cụm sân. Giá trị mặc định là 120 phút, khoảng cho phép từ 0 đến 10080. Giá trị 0 cho phép người chơi hủy đến trước giờ bắt đầu nếu đơn còn đủ điều kiện hủy. MySQL áp dụng cấu hình hiện tại của cụm sân khi hủy đơn. Chủ của cụm sân đó, quản trị viên và nhân viên được miễn hạn này khi xử lý đơn theo quyền hiện có.
+- `POST /api/bookings/:bookingId/cancel` trả HTTP 409 với mã `CANCEL_WINDOW_CLOSED` nếu khách hủy sau hạn.
+- API tạo và sửa cụm sân hoặc sân con nhận `image_url` là URL HTTP(S) tối đa 500 ký tự. Khi sửa, bỏ qua trường này để giữ ảnh hiện tại hoặc gửi `null` để xóa URL. API danh sách cụm sân, danh sách sân và tìm sân trả URL đã lưu.
+
+Đã kiểm thử trên MySQL 8.4 tạm. Schema cài mới thành công, migration chạy được trên schema cũ và chạy lại được. Kiểm thử API xác nhận khách hủy trước hạn thành công, hủy trễ nhận HTTP 409 và đơn vẫn chờ xử lý. Chủ sân vẫn từ chối được đơn chờ duyệt. Cấu hình 0 phút cho phép khách hủy trước giờ bắt đầu. API lưu, đọc, giữ và xóa URL ảnh, từ chối URL sai loại và từ chối người chơi sửa cấu hình cụm sân.
 
 ## API chính
 

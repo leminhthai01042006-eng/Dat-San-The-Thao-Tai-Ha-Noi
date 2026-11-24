@@ -19,7 +19,7 @@ async function findAvailableCourts({
     ),
     matching_courts AS (
       SELECT c.court_id, c.court_name, c.sport_type, c.price_per_hour,
-             c.requires_approval,
+             c.requires_approval, c.image_url, f.cancel_before_minutes,
              f.facility_id, f.facility_name, f.address, f.district,
              f.open_time, f.close_time, f.is_overnight,
              r.starts_at, r.ends_at,
@@ -43,7 +43,7 @@ async function findAvailableCourts({
     court_status AS (
       SELECT m.court_id, m.court_name, m.sport_type, m.price_per_hour,
              m.requires_approval, m.facility_id, m.facility_name,
-             m.address, m.district,
+             m.address, m.district, m.image_url, m.cancel_before_minutes,
              (SELECT COUNT(*)
               FROM BOOKINGS AS b
               WHERE b.court_id = m.court_id

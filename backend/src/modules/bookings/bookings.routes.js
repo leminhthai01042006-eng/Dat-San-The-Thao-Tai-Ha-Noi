@@ -230,6 +230,13 @@ router.post("/:bookingId/cancel", requireAuth, async (request, response) => {
 
     return response.json({ message: "Đã hủy đơn đặt sân." });
   } catch (error) {
+    if (error.sqlState === "45000" && error.sqlMessage?.startsWith("CANCEL_WINDOW_CLOSED:")) {
+      return response.status(409).json({
+        code: "CANCEL_WINDOW_CLOSED",
+        error: "Đã quá hạn hủy đơn do chủ sân quy định.",
+      });
+    }
+
     console.error("Lỗi hủy đơn đặt sân:", error.code || error.message);
     return response.status(500).json({ error: "Không thể hủy đơn đặt sân." });
   }
