@@ -37,6 +37,59 @@ router.get("/sports", async (_request, response) => {
   }
 });
 
+router.get("/court-counts", async (_request, response) => {
+  try {
+    const [sports] = await db.query(`
+      SELECT s.sport_code, s.name, COUNT(f.facility_id) AS court_count
+      FROM sports s
+      LEFT JOIN COURTS c ON c.sport_type = s.sport_code
+        AND c.deleted_at IS NULL
+      LEFT JOIN FACILITIES f ON f.facility_id = c.facility_id
+        AND f.is_active = 1 AND f.deleted_at IS NULL
+      WHERE s.is_active = 1
+      GROUP BY s.sport_code, s.name
+      ORDER BY court_count DESC, s.name, s.sport_code
+    `);
+    return response.json({
+      total: sports.reduce((sum, sport) => sum + Number(sport.court_count), 0),
+      sports,
+    });
+  } catch (error) {
+    console.error("Lỗi thống kê sân theo môn:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể tải số liệu sân. Bấm lại để thử." });
+  }
+});
+
+router.get("/court-occupancy", async (_request, response) => {
+  try {
+    const [[counts]] = await db.query(`
+      WITH current_time_vn AS (
+        SELECT TIMESTAMPADD(HOUR, 7, UTC_TIMESTAMP()) AS current_at
+      )
+      SELECT COUNT(*) AS total, COUNT(CASE WHEN EXISTS (
+        SELECT 1 FROM BOOKINGS b
+        WHERE b.court_id = c.court_id
+          AND b.is_active_slot = 1
+          AND (b.status <> 'Pending' OR b.hold_expires_at > t.current_at)
+          AND b.start_time <= t.current_at AND b.end_time > t.current_at
+      ) THEN 1 END) AS occupied
+      FROM COURTS c
+      JOIN FACILITIES f ON f.facility_id = c.facility_id
+      JOIN sports s ON s.sport_code = c.sport_type
+      CROSS JOIN current_time_vn t
+      WHERE c.deleted_at IS NULL AND c.status = 'Available'
+        AND f.is_active = 1 AND f.deleted_at IS NULL AND s.is_active = 1
+    `);
+    const total = Number(counts.total);
+    const occupied = Number(counts.occupied);
+    response.set("Cache-Control", "no-store");
+    return response.json({ total, occupied, available: total - occupied });
+  } catch (error) {
+    console.error("Lỗi thống kê tình trạng sân:", error.code || error.message);
+    return response.status(500).json({ error: "Chưa thể tải tình trạng sân. Bấm lại để thử." });
+  }
+});
+
 router.get("/mine", requireAuth, async (request, response) => {
   if (request.user.role !== "OWNER") {
     return response.status(403).json({

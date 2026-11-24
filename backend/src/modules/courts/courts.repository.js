@@ -11,15 +11,15 @@ async function findAvailableCourts({
 }) {
   if (facilityIds?.length === 0) return [];
   const facilityFilter = facilityIds ? "AND f.facility_id IN (" + facilityIds.map(() => "?").join(",") + ")" : "";
-  const [courts] = await db.execute(
-    `
+  const details = "c.image_url, f.cancel_before_minutes";
+  const sql = `
     WITH requested_time AS (
       SELECT CAST(? AS DATETIME) AS starts_at,
              CAST(? AS DATETIME) AS ends_at
     ),
     matching_courts AS (
       SELECT c.court_id, c.court_name, c.sport_type, c.price_per_hour,
-             c.requires_approval, c.image_url, f.cancel_before_minutes,
+             c.requires_approval, ${details},
              f.facility_id, f.facility_name, f.address, f.district,
              f.open_time, f.close_time, f.is_overnight,
              r.starts_at, r.ends_at,
@@ -63,8 +63,8 @@ async function findAvailableCourts({
     FROM court_status
     WHERE ? OR booking_count = 0
     ORDER BY price_per_hour, court_id
-  `,
-    [
+  `;
+  const params = [
       startTime,
       endTime,
       district,
@@ -75,8 +75,17 @@ async function findAvailableCourts({
       maxPrice,
       ...(facilityIds ?? []),
       includeStatus ? 1 : 0,
-    ],
-  );
+  ];
+  let courts;
+  try {
+    [courts] = await db.execute(sql, params);
+  } catch (error) {
+    // Existing databases can serve availability while migration 001 is pending.
+    if (error.code !== "ER_BAD_FIELD_ERROR" ||
+        !/Unknown column '(c\.image_url|f\.cancel_before_minutes)'/.test(error.sqlMessage)) throw error;
+    const legacySql = sql.replace(details, "NULL AS image_url, NULL AS cancel_before_minutes");
+    [courts] = await db.execute(legacySql, params);
+  }
 
   return includeStatus ? courts : courts.map(({ booking_count: _count, ...court }) => court);
 }

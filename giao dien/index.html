@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CourtPulse · Đặt sân thể thao Hà Nội</title>
+  <meta name="description" content="Tìm sân trống tại Hà Nội và đặt lịch chơi thể thao theo môn, ngày và giờ.">
+  <!-- Adapted from Arsha by BootstrapMade. https://bootstrapmade.com/arsha-free-bootstrap-html-template-corporate/ -->
+  <link rel="stylesheet" href="assets/vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="assets/vendor/bootstrap-icons/bootstrap-icons.css">
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/courtpulse.css">
+  <script src="assets/js/courtpulse.js" defer></script>
+</head>
+<body class="cp">
+<header id="header"><div class="container topbar">
+  <a class="brand" href="#hero" aria-label="CourtPulse, trang chủ"><i class="bi bi-activity"></i>CourtPulse<span>.</span></a>
+  <nav aria-label="Điều hướng chính">
+    <a href="#hero">Trang chính</a>
+    <a href="#about">Về chúng tôi</a>
+    <button type="button" disabled>Liên hệ</button>
+    <details id="sport-menu" class="sport-menu">
+      <summary>Tìm sân <i class="bi bi-chevron-down" aria-hidden="true"></i></summary>
+      <ul>
+        <li><button type="button" data-sport="">Tất cả các môn</button></li>
+        <li><button type="button" data-sport="BADMINTON">Cầu lông</button></li>
+        <li><button type="button" data-sport="PICKLEBALL">Pickleball</button></li>
+        <li><button type="button" data-sport="TABLE_TENNIS">Bóng bàn</button></li>
+        <li><button type="button" data-sport="VOLLEYBALL">Bóng chuyền</button></li>
+      </ul>
+    </details>
+    <button id="history" type="button">Lịch của tôi</button>
+  </nav>
+  <button class="login" id="account"><i class="bi bi-person-circle"></i> <span>Đăng nhập</span></button>
+</div></header>
+<main>
+<section class="cover" id="hero">
+  <div class="cover-photo" aria-hidden="true"></div>
+  <div class="cover-slide cover-illustration" aria-hidden="true"></div>
+  <div class="cover-slide cover-ribbons" aria-hidden="true"></div>
+  <div class="container cover-inner">
+    <div class="cover-copy">
+      <div class="cover-feature" id="cover-default-copy">
+        <h1>CÔNG CỤ KHÔNG THỂ THIẾU<br><em>CHO THÓI QUEN HÀNG NGÀY CỦA BẠN</em></h1>
+        <p class="intro">Dành thời gian cho môn thể thao bạn yêu thích mỗi ngày. Với CourtPulse, bạn có thể tìm sân trống, chọn giờ phù hợp và lên lịch chơi cùng bạn bè.</p>
+        <a class="jump" href="#sports" hidden>Khám phá môn thể thao <i class="bi bi-arrow-down-right"></i></a>
+      </div>
+      <div class="cover-feature" id="cover-tech-copy" inert>
+        <p class="location"><i class="bi bi-geo-alt-fill"></i> HÀ NỘI, VIỆT NAM</p>
+        <h1>GIẢI PHÁP CÔNG NGHỆ<br><em>THỜI ĐẠI MỚI</em></h1>
+        <p class="intro">CourtPulse giúp bạn tra cứu sân trống, so sánh giá thuê và đặt lịch trực tuyến trong vài bước.</p>
+      </div>
+      <div class="cover-feature" id="cover-ribbons-copy" inert>
+        <h1>GIAO DIỆN RÕ RÀNG<br><em>DỄ SỬ DỤNG</em></h1>
+        <p class="intro">Chọn môn, xem khung giờ và giá thuê, rồi đặt sân theo từng bước trên điện thoại hoặc máy tính.</p>
+      </div>
+    </div>
+  </div>
+  <div class="cover-progress" id="cover-progress" role="group" aria-label="Chọn ảnh bìa">
+    <button type="button" aria-label="Ảnh sân bóng chuyền" aria-current="true"><span aria-hidden="true"></span></button>
+    <button type="button" aria-label="Ảnh minh họa tìm sân"><span aria-hidden="true"></span></button>
+    <button type="button" aria-label="Ảnh dải màu"><span aria-hidden="true"></span></button>
+  </div>
+</section>
+<div class="container content" id="finder-area" hidden>
+<form id="finder" class="finder">
+<label><span><i class="bi bi-dribbble"></i> Môn thể thao</span><select name="sport"><option value="">Tất cả các môn</option><option value="BADMINTON">Cầu lông</option><option value="PICKLEBALL">Pickleball</option><option value="TABLE_TENNIS">Bóng bàn</option><option value="VOLLEYBALL">Bóng chuyền</option></select></label>
+<label><span><i class="bi bi-calendar3"></i> Ngày chơi</span><input type="date" name="date" required></label>
+<label><span><i class="bi bi-clock"></i> Bắt đầu</span><input type="time" name="time" required value="18:00"></label>
+<label><span><i class="bi bi-hourglass-split"></i> Thời lượng</span><select name="minutes"><option value="60">60 phút</option><option value="90">90 phút</option><option value="120">120 phút</option></select></label>
+<button class="cta" type="submit"><i class="bi bi-search"></i> Tìm sân trống</button>
+</form>
+<section id="results" hidden tabindex="-1"><h2>Sân trong khung giờ đã chọn</h2><div id="matches" aria-live="polite"></div></section>
+<section id="sports" hidden><div class="section-heading"><div><p class="eyebrow"><b></b> KHÁM PHÁ</p><h2>Chọn môn thể thao</h2></div></div>
+<div class="sport-grid">
+<button type="button" class="sport badminton" data-sport="BADMINTON"><span class="sport-art" aria-hidden="true"></span><span class="sport-title">Cầu lông<i class="bi bi-arrow-up-right"></i></span></button>
+<button type="button" class="sport pickle" data-sport="PICKLEBALL"><span class="sport-art" aria-hidden="true"></span><span class="sport-title">Pickleball<i class="bi bi-arrow-up-right"></i></span></button>
+<button type="button" class="sport table-tennis" data-sport="TABLE_TENNIS"><span class="sport-art" aria-hidden="true"></span><span class="sport-title">Bóng bàn<i class="bi bi-arrow-up-right"></i></span></button>
+<button type="button" class="sport volley" data-sport="VOLLEYBALL"><span class="sport-art" aria-hidden="true"></span><span class="sport-title">Bóng chuyền<i class="bi bi-arrow-up-right"></i></span></button>
+</div></section></div>
+<section id="about" class="about" aria-labelledby="about-title">
+  <div class="container">
+    <div class="section-title">
+      <h2 id="about-title">Về chúng tôi</h2>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <article class="about-panel">
+          <h3><i class="bi bi-person-fill" aria-hidden="true"></i> Dành cho người chơi</h3>
+          <p>CourtPulse là dự án tìm và đặt sân thể thao tại Hà Nội. Chúng mình xây dựng CourtPulse để bạn có thể tìm một sân gần nơi ở hoặc chỗ làm, xem giờ còn trống trước khi rủ bạn bè và chủ động sắp xếp buổi chơi.</p>
+          <p>Bạn có thể bắt đầu với cầu lông, pickleball, bóng bàn hoặc bóng chuyền. Khi đã thống nhất lịch với cả nhóm, hãy kiểm tra những thông tin sau trước khi đặt sân.</p>
+          <ul>
+            <li><i class="bi bi-dribbble" aria-hidden="true"></i> Chọn môn thể thao bạn muốn chơi.</li>
+            <li><i class="bi bi-calendar-check" aria-hidden="true"></i> Tìm sân trống theo ngày và khung giờ.</li>
+            <li><i class="bi bi-cash-coin" aria-hidden="true"></i> Xem giá thuê trước khi đặt.</li>
+          </ul>
+          <p>Sau khi đặt, bạn có thể xem lại thông tin và trạng thái đơn trong mục <strong>Lịch của tôi</strong>.</p>
+        </article>
+      </div>
+      <div class="col-md-6">
+        <article class="about-panel">
+          <h3><i class="bi bi-building" aria-hidden="true"></i> Dành cho chủ sân</h3>
+          <p>CourtPulse giúp chủ sân quản lý thông tin cụm sân, cập nhật giờ mở cửa và công bố giá thuê cho từng sân. Khi một sân cần bảo trì, chủ sân có thể đổi trạng thái để khách biết sân đang tạm ngừng nhận lịch.</p>
+          <ul>
+            <li><i class="bi bi-grid-3x3-gap" aria-hidden="true"></i> Quản lý các sân trong cùng một cụm.</li>
+            <li><i class="bi bi-clipboard-check" aria-hidden="true"></i> Xem và xử lý yêu cầu đặt sân đang chờ duyệt.</li>
+            <li><i class="bi bi-graph-up-arrow" aria-hidden="true"></i> Theo dõi doanh thu theo từng giai đoạn.</li>
+          </ul>
+          <details class="about-details">
+            <summary class="read-more">Tìm hiểu thêm <i class="bi bi-arrow-right" aria-hidden="true"></i></summary>
+            <p>Chủ sân có thể bật yêu cầu duyệt cho từng sân. Khi khách gửi yêu cầu, chủ sân xem khung giờ rồi xác nhận hoặc từ chối lượt đặt.</p>
+          </details>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="why-us" class="why-us" aria-labelledby="why-us-title">
+  <div class="container">
+    <div class="row align-items-center gx-lg-5 gy-4">
+      <div class="col-lg-7">
+        <h2 id="why-us-title">Vì sao chọn CourtPulse?</h2>
+        <p class="why-us-intro">Người chơi dễ chọn sân theo lịch của mình, còn chủ sân có thể theo dõi và xử lý các lượt đặt ở cùng một nơi.</p>
+        <div class="why-us-options">
+          <details name="courtpulse-benefits" open>
+            <summary><i class="bi bi-calendar-check" aria-hidden="true"></i> Tìm sân phù hợp với lịch của bạn <i class="bi bi-chevron-down" aria-hidden="true"></i></summary>
+            <p>Chọn môn, ngày chơi, giờ bắt đầu và thời lượng để xem những sân còn trống trong khoảng thời gian cả nhóm đã thống nhất.</p>
+          </details>
+          <details name="courtpulse-benefits">
+            <summary><i class="bi bi-cash-coin" aria-hidden="true"></i> Xem giá trước khi đặt <i class="bi bi-chevron-down" aria-hidden="true"></i></summary>
+            <p>Xem giá thuê theo giờ trước khi chọn sân. Sau khi gửi yêu cầu đặt sân, bạn có thể kiểm tra trạng thái đơn trong mục <strong>Lịch của tôi</strong>.</p>
+          </details>
+          <details name="courtpulse-benefits">
+            <summary><i class="bi bi-building" aria-hidden="true"></i> Quản lý lịch đặt dành cho chủ sân <i class="bi bi-chevron-down" aria-hidden="true"></i></summary>
+            <p>Chủ sân có thể cập nhật thông tin và tình trạng của từng sân, đồng thời xác nhận hoặc từ chối các yêu cầu đặt sân đang chờ duyệt.</p>
+          </details>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="why-us-visual" aria-hidden="true">
+          <img src="assets/img/why-us.png" width="1200" height="900" class="img-fluid why-us-image" alt="" loading="lazy" decoding="async">
+          <img src="assets/img/courtpulse/volleyball.jpg" class="why-us-photo" alt="" loading="lazy" decoding="async">
+          <i class="bi bi-activity why-us-mark"></i>
+        </div>
+      </div>
+    </div>
+    <div class="booking-comparison" aria-labelledby="booking-comparison-title">
+      <h3 id="booking-comparison-title">So sánh các nền tảng đặt sân</h3>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <article class="comparison-card">
+            <h4>ALOBO</h4>
+            <dl>
+              <dt>Ưu điểm</dt>
+              <dd>Đặt qua web hoặc ứng dụng, xem giờ trống và đặt lịch cố định theo tháng.</dd>
+              <dt>Điểm cần lưu ý</dt>
+              <dd>Xác nhận thanh toán tự động qua BIDV cần sân đã tích hợp. Với chuyển khoản thủ công, chủ sân kiểm tra giao dịch.</dd>
+            </dl>
+            <p><a href="https://wiki.alobo.vn/">Tính năng ALOBO</a> · <a href="https://wiki.alobo.vn/article/huong-dan-dat-lich-online-va-duyet-don/">Hướng dẫn đặt lịch</a></p>
+          </article>
+        </div>
+        <div class="col-md-4">
+          <article class="comparison-card">
+            <h4>Datsan247</h4>
+            <dl>
+              <dt>Ưu điểm</dt>
+              <dd>Danh mục nhiều môn thể thao, có tìm sân theo giá và khung giờ, đặt và thanh toán trực tuyến.</dd>
+              <dt>Điểm cần lưu ý</dt>
+              <dd>Điều kiện hoãn hoặc hủy tùy từng sân. Chính sách của nền tảng hướng dẫn khách liên hệ qua điện thoại hoặc email.</dd>
+            </dl>
+            <p><a href="https://apps.apple.com/vn/app/datsan247-t%C3%ACm-s%C3%A2n/id1641420761">Tính năng Datsan247</a> · <a href="https://www.datsan247.com/bai-viet/chinh-sach-huy-doi-tra">Chính sách hủy</a></p>
+          </article>
+        </div>
+        <div class="col-md-4">
+          <article class="comparison-card">
+            <h4>D-JOY</h4>
+            <dl>
+              <dt>Ưu điểm</dt>
+              <dd>Tập trung vào pickleball, kết hợp đặt sân, đăng ký giải đấu và theo dõi xếp hạng.</dd>
+              <dt>Điểm cần lưu ý</dt>
+              <dd>Phạm vi pickleball phù hợp với người chuyên chơi môn này. Người chơi nhiều môn cần thêm nguồn tìm sân.</dd>
+            </dl>
+            <p><a href="https://apps.apple.com/vn/app/d-joy/id6740696112">Tính năng D-JOY</a></p>
+          </article>
+        </div>
+      </div>
+      <div class="comparison-summary">
+        <i class="bi bi-activity" aria-hidden="true"></i>
+        <div>
+          <h4>Khi nào nên chọn CourtPulse?</h4>
+          <p>Khi nhóm bạn chơi nhiều môn ở Hà Nội, CourtPulse tập trung vào một luồng trên web cho cầu lông, pickleball, bóng bàn và bóng chuyền. Người chơi có thể tìm theo khung giờ, xem giá thuê và theo dõi đơn. Chủ sân có thể quy định hạn hủy theo cụm và chọn sân nào cần duyệt trước khi xác nhận.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="work-process" class="work-process" aria-labelledby="work-process-title">
+  <div class="container">
+    <div class="section-title">
+      <h2 id="work-process-title">Quy trình hoạt động</h2>
+    </div>
+    <p class="process-question" id="process-question">Bạn sử dụng CourtPulse với vai trò nào?</p>
+    <div class="process-choices" id="process-choices" role="group" aria-labelledby="process-question">
+      <button type="button" aria-controls="process-player" aria-pressed="false">
+        <i class="bi bi-person-fill" aria-hidden="true"></i> Bạn là người chơi
+      </button>
+      <button type="button" aria-controls="process-owner" aria-pressed="false">
+        <i class="bi bi-building" aria-hidden="true"></i> Bạn là chủ sân
+      </button>
+    </div>
+
+    <div class="process-panels">
+    <div class="process-panel" id="process-player" role="region" aria-labelledby="process-player-title">
+        <div class="process-panel-head">
+          <h3 id="process-player-title">Tìm và đặt sân</h3>
+        </div>
+        <ol class="process-steps" role="list">
+            <li>
+              <i class="bi bi-search" aria-hidden="true"></i>
+              <div><h4>Chọn môn và giờ chơi</h4><p>Chọn môn, ngày, giờ bắt đầu và thời lượng để xem những sân còn trống.</p></div>
+              <div class="process-demo player-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo tìm sân</span></div>
+            </li>
+            <li>
+              <i class="bi bi-calendar-check" aria-hidden="true"></i>
+              <div><h4>Gửi yêu cầu đặt sân</h4><p>Xem địa chỉ và giá thuê, chọn sân phù hợp rồi đăng nhập để gửi yêu cầu.</p></div>
+              <div class="process-demo player-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo đặt sân</span></div>
+            </li>
+            <li>
+              <i class="bi bi-clock-history" aria-hidden="true"></i>
+              <div><h4>Theo dõi lịch của bạn</h4><p>Mở <strong>Lịch của tôi</strong> để xem trạng thái. Nếu sân yêu cầu duyệt, chờ chủ sân phản hồi.</p></div>
+              <div class="process-demo player-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo lịch đặt</span></div>
+            </li>
+        </ol>
+        <div class="player-process-footer">
+          <div class="process-action player-process-action">
+            <p>Bạn đã sẵn sàng chơi hết mình chưa?</p>
+            <button type="button" id="start-finder" aria-controls="finder-area" aria-expanded="false"><i class="bi bi-search" aria-hidden="true"></i> Bắt đầu đặt sân</button>
+          </div>
+          <aside class="court-chart-card" aria-labelledby="court-chart-title">
+            <h3 id="court-chart-title">Số sân theo môn</h3>
+            <p id="court-chart-status" role="status"></p>
+            <ul class="court-chart-bars" id="court-chart-bars"></ul>
+          </aside>
+        </div>
+    </div>
+    <div class="process-panel owner-process" id="process-owner" role="region" aria-labelledby="process-owner-title" inert>
+      <div class="process-panel-head">
+        <h3 id="process-owner-title">Vận hành cụm sân</h3>
+      </div>
+      <ol class="process-steps" role="list">
+          <li>
+            <i class="bi bi-grid-3x3-gap" aria-hidden="true"></i>
+            <div><h4>Thiết lập cụm sân</h4><p>Nhập địa chỉ, giờ mở cửa và thêm từng sân với môn thể thao, giá thuê và trạng thái hoạt động.</p></div>
+            <div class="process-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo thiết lập sân</span></div>
+          </li>
+          <li>
+            <i class="bi bi-clipboard-check" aria-hidden="true"></i>
+            <div><h4>Xử lý yêu cầu đặt sân</h4><p>Chọn sân nào cần duyệt. Khi có yêu cầu mới, kiểm tra khung giờ rồi xác nhận hoặc từ chối.</p></div>
+            <div class="process-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo duyệt lượt đặt</span></div>
+          </li>
+          <li>
+            <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+            <div><h4>Theo dõi hoạt động</h4><p>Xem doanh thu theo kỳ và cập nhật trạng thái sân khi cần bảo trì hoặc tạm ngừng hoạt động.</p></div>
+            <div class="process-demo"><i class="bi bi-image" aria-hidden="true"></i><span>Ảnh demo theo dõi doanh thu</span></div>
+          </li>
+      </ol>
+      <div class="owner-process-footer">
+        <div class="process-action owner-process-action">
+          <p>Bạn sẵn sàng quản lý sân chưa?</p>
+          <button type="button" disabled><i class="bi bi-plus-lg" aria-hidden="true"></i> Bắt đầu thêm sân</button>
+        </div>
+        <aside class="court-chart-card occupancy-card" aria-labelledby="occupancy-title">
+          <h3 id="occupancy-title">Tình trạng sân hiện tại</h3>
+          <p id="occupancy-status" role="status"></p>
+          <div class="occupancy-content" id="occupancy-content" hidden>
+            <div class="occupancy-donut" id="occupancy-donut" aria-hidden="true"></div>
+            <ul class="occupancy-legend">
+              <li><span class="occupancy-dot occupied"></span> Đã đặt hoặc đang giữ chỗ <strong id="occupancy-booked"></strong></li>
+              <li><span class="occupancy-dot available"></span> Sân trống <strong id="occupancy-free"></strong></li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </div>
+    </div>
+  </div>
+</section>
+</main>
+<footer><div class="container"><strong>CourtPulse.</strong><span>Đặt sân thể thao tại Hà Nội</span><small>Thiết kế từ <a href="https://bootstrapmade.com/">BootstrapMade</a></small></div></footer>
+<dialog id="panel" aria-labelledby="panel-title"><div class="dialog-head"><h2 id="panel-title"></h2><button id="close" aria-label="Đóng"><i class="bi bi-x-lg"></i></button></div><div id="panel-body"></div><p id="feedback" role="status"></p></dialog>
+</body></html>

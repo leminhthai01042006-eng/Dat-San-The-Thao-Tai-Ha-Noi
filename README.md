@@ -4,20 +4,18 @@ CourtPulse hỗ trợ tìm và đặt sân thể thao tại Hà Nội. Có ba kh
 
 ## Chạy website trên Windows
 
-1. Khởi động MySQL và backend theo phần bên dưới. Nếu backend đang chạy từ phiên trước, dừng bằng `Ctrl+C` rồi khởi động lại để nạp các API mới.
-2. Mở terminal PowerShell thứ hai trong thư mục gốc của repo.
+1. Khởi động MySQL và cấu hình backend theo phần bên dưới.
+2. Trong PowerShell, từ thư mục gốc của dự án chạy:
 
    ```powershell
-   Set-Location frontend
+   Set-Location backend
    npm.cmd ci
-   npm.cmd run dev
+   npm.cmd start
    ```
 
-3. Mở [CourtPulse trên cổng 5173](http://localhost:5173), hoặc dùng địa chỉ do Vite in ra. Vite chuyển các yêu cầu `/api` sang backend trên cổng `3000` và dùng chung địa chỉ cho cookie phiên. Nếu đổi cổng backend bằng biến môi trường `PORT`, đặt `COURTPULSE_API_TARGET` ở terminal frontend theo địa chỉ backend tương ứng.
+3. Mở [CourtPulse](http://localhost:3000). Express phục vụ giao diện Arsha trong `giao dien`, font HarmonyOS Sans và API trên cùng cổng. Người chơi có thể tìm sân, đăng nhập, đặt và hủy lịch.
 
-Trong thư mục `frontend`, dùng `npm.cmd run lint` để kiểm tra mã và `npm.cmd run build` để tạo bản dựng.
-
-## Hạng mục giao diện cho báo cáo
+## Hạng mục giao diện cho báo cáo (phiên bản React trước đây)
 
 - **Trang chủ.** Ảnh sân minh họa riêng và số liệu từ danh bạ hiện có. Bộ lọc khu vực, môn, ngày giờ và giá tối đa nằm ở trang tìm sân trống. Số liệu xuất hiện khi cuộn nhờ [Count Up của React Bits](https://reactbits.dev/text-animations/count-up), kèm [giấy phép](frontend/REACT-BITS-LICENSE.md).
 - **Người chơi.** Đăng ký, đăng nhập, xem khung giờ đã có lịch, giữ chỗ và xem hoặc hủy lượt đặt theo điều kiện của backend. Lịch hiển thị riêng tình trạng giữ chỗ và xác nhận của chủ sân.

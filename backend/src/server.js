@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("node:path");
 const session = require("express-session");
 const db = require("./config/db");
 const facilitiesRouter = require("./modules/facilities/facilities.routes");
@@ -12,6 +13,11 @@ const {
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const project = path.resolve(__dirname, "../..");
+const template = path.join(project, "giao dien");
+app.get("/", (_request, response) => response.sendFile(path.join(template, "index.html")));
+app.use("/assets", express.static(path.join(template, "assets")));
+app.use("/fonts", express.static(path.join(project, "HarmonyOS_Sans")));
 
 app.get("/api/health", async (_request, response) => {
   try {
